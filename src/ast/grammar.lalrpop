@@ -158,6 +158,8 @@ StmtExpr: ExprKind = {
 
     "loop" <body:Spanned<BlockExpr>> => ExprKind::Loop(Box::new(body)),
 
+    "break" => ExprKind::Break,
+
     "while" <cond:Spanned<Expr>> <body:Spanned<BlockExpr>> => ExprKind::While { cond: Box::new(cond), body: Box::new(body) },
 
     "return" <expr:Spanned<StmtExpr>> => ExprKind::Return(Box::new(expr)),    

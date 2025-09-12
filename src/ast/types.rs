@@ -305,6 +305,7 @@ pub enum ExprKind {
         cond: Box<Expr>,
         body: Box<Expr>,
     },
+    Break,
     Assign {
         dst: Box<Expr>,
         src: Box<Expr>,

@@ -104,6 +104,7 @@ pub trait VisitMut {
                     self.visit_texpr(&mut *else_);
                 }
             }
+            ExprKind::Break => (),
             ExprKind::Loop(body) => {
                 self.visit_texpr(&mut *body);
             }

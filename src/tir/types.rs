@@ -79,6 +79,7 @@ pub enum ExprKind {
         e1: Box<Expr>,
         e2: Box<Expr>,
     },
+    Break,
     Return(Box<Expr>),
     Loop(Box<Expr>),
     While {

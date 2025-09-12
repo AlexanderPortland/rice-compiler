@@ -1,6 +1,6 @@
 //! Pretty-printer for the TIR.
 
-use std::fmt;
+use std::fmt::{self, write};
 
 use super::types::{Expr, ExprKind, Function, ParamList, Program};
 use crate::{
@@ -106,6 +106,7 @@ impl fmt::Display for ExprKind {
             ExprKind::Let { name, ty, e1, e2 } => {
                 write!(f, "let {}: {} = {} in\n{}", name, ty, e1, e2)
             }
+            ExprKind::Break => write!(f, "break"),
             ExprKind::Return(e) => write!(f, "return {}", e),
             ExprKind::If { cond, then_, else_ } => match else_ {
                 Some(else_expr) => write!(
