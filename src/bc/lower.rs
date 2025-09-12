@@ -317,15 +317,10 @@ impl<'a> LowerBody<'a> {
             }
 
             tir::ExprKind::Break => {
-                // gtfo and get a wholly new block
-                let break_to = self.break_to_block.last();
-                log::debug!(
-                    "doign break... w/ {:?} to {:?}",
-                    self.break_to_block,
-                    break_to
+                let break_to = *self.break_to_block.last().expect(
+                    "if this fails, we don't have anything on the break to stack :(, \
+                            so this should be caught by type checking",
                 );
-                let break_to = *break_to
-                    .expect("if this fails, we don't have anything on the break to stack :(");
 
                 let new_block = self.new_block();
                 self.finish_block(
@@ -341,7 +336,6 @@ impl<'a> LowerBody<'a> {
                     loc: AllocLoc::Heap,
                     args: AllocArgs::Lit(Vec::new())
                 });
-                // todo!();
             }
 
             tir::ExprKind::Loop(body) => {

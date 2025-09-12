@@ -1,0 +1,15 @@
+fn main() {
+  let acc = 0 in
+  let y = 0 in
+  loop {
+    let x = 0 in
+    loop {
+      x := x + 1;
+      acc := acc + 1;
+      if x >= 5 { break } else { () }
+    };
+    y := y + 1;
+    if y >= 5 { break } else { () }
+  };
+  println(int_to_string(acc))
+}

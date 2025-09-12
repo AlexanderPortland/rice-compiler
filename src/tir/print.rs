@@ -1,6 +1,6 @@
 //! Pretty-printer for the TIR.
 
-use std::fmt::{self, write};
+use std::fmt;
 
 use super::types::{Expr, ExprKind, Function, ParamList, Program};
 use crate::{
