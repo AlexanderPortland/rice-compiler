@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × type mismatch
+   ╭─[array_index_write_homogenous.rice:3:3]
+ 2 │   let x: [int] = [0, 1, 2] in
+ 3 │   x[1] := "hello";
+   ·   ──┬─
+   ·     ╰── expected `string`, found `int`
+ 4 │   println(int_to_string(x[0]));
+   ╰────
+
+'''

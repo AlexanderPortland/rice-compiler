@@ -1,0 +1,6 @@
+fn main() {
+  let x: [int] = [|0; 5|] in
+  println(int_to_string(x[0]));
+  println(int_to_string(x[1]));
+  println(int_to_string(x[6]))
+}

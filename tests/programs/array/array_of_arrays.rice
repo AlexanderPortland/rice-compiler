@@ -1,0 +1,6 @@
+fn main() {
+  let x: [[int]] = [[0, 1], [2, 3], [4, 5]] in
+  println(int_to_string(x[1][1])); // should be 3
+  println(int_to_string(x[2][0])); // should be 4
+  println(int_to_string(x[0][1]))  // should be 1
+}

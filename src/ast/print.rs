@@ -158,6 +158,13 @@ impl fmt::Display for ExprKind {
                 write!(f, "while {} {{\n{}\n}}", cond, indent(format!("{}", body)))
             }
             ExprKind::Return(e) => write!(f, "return {}", e),
+            ExprKind::ArrayCopy { e, count } => write!(f, "[|{e}-{count}|]"),
+            ExprKind::ArrayLit(exprs) => {
+                write!(f, "[")?;
+                write_comma_separated(f, exprs)?;
+                write!(f, "]")
+            }
+            ExprKind::Index { e, i } => write!(f, "{e}[{i}]"),
         }
     }
 }
@@ -215,6 +222,7 @@ impl fmt::Display for TypeKind {
                 write_comma_separated(f, types)?;
                 write!(f, ")")
             }
+            TypeKind::Array(ty) => write!(f, "[{ty}]"),
             TypeKind::Func { inputs, output } => {
                 write!(f, "fn(")?;
                 write_comma_separated(f, inputs)?;

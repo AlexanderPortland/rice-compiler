@@ -67,6 +67,7 @@ pub fn codegen<'a>(
         func_name_to_code_idx: HashMap::new(),
         types: TypeSection::new(),
         struct_ty_idx: HashMap::new(),
+        array_ty_idx: HashMap::new(),
         data: DataSection::new(),
         data_offset: 0,
         func_refs: Vec::new(),
@@ -119,6 +120,7 @@ struct CodegenModule<'a> {
     func_name_to_code_idx: HashMap<Symbol, u32>,
     types: TypeSection,
     struct_ty_idx: HashMap<StructType, u32>,
+    array_ty_idx: HashMap<StorageType, u32>,
     data: DataSection,
     data_offset: u32,
     func_refs: Vec<u32>,
@@ -251,6 +253,20 @@ impl CodegenModule<'_> {
         }
     }
 
+    fn wasm_array_ty_idx(&mut self, ty: StorageType) -> u32 {
+        match self.array_ty_idx.get(&ty) {
+            Some(idx) => *idx,
+            None => {
+                self.types
+                    .ty()
+                    .array(&ty, true /* structs mutable by default */);
+                let idx = self.types.len() - 1;
+                self.array_ty_idx.insert(ty, idx);
+                idx
+            }
+        }
+    }
+
     fn interface_ty_idx(&mut self, intf: Symbol) -> u32 {
         let methods = &self.tcx.globals().intfs[&intf];
         let fields = methods
@@ -303,6 +319,17 @@ impl CodegenModule<'_> {
         self.wasm_struct_ty_idx(struct_type)
     }
 
+    fn array_ty_idx(&mut self, ty: bc::Type) -> u32 {
+        let bc::TypeKind::Array(arr_ty) = ty.kind() else {
+            panic!("{ty:?} is not an array")
+        };
+
+        let new_ty = StorageType::Val(self.gen_ty(*arr_ty));
+        self.types.ty().array(&new_ty, true);
+        // wasmtime::ArrayType::new(self., field_type)
+        todo!();
+    }
+
     fn closure_ty_idx(&mut self) -> u32 {
         let fields = Box::new([
             FieldType {
@@ -333,6 +360,13 @@ impl CodegenModule<'_> {
                         nullable: true,
                     })
                 }
+            }
+            bc::TypeKind::Array(inner_ty) => {
+                let idx = self.array_ty_idx(ty);
+                ValType::Ref(RefType {
+                    nullable: true,
+                    heap_type: HeapType::Concrete(idx),
+                })
             }
             bc::TypeKind::Func { .. } => ValType::Ref(RefType {
                 heap_type: HeapType::Concrete(self.closure_ty_idx()),
@@ -415,6 +449,7 @@ impl CodegenFunc<'_, '_> {
                     bc::ProjectionElem::Field { index, ty } => {
                         instrs.struct_get(self.module.tuple_ty_idx(*ty), *index as u32);
                     }
+                    bc::ProjectionElem::Index { index, ty } => {}
                 }
             }
 
@@ -422,6 +457,12 @@ impl CodegenFunc<'_, '_> {
                 bc::ProjectionElem::Field { index, ty } => {
                     self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
                     instrs.struct_set(self.module.tuple_ty_idx(*ty), *index as u32);
+                }
+                bc::ProjectionElem::Index { index, ty } => {
+                    self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
+                    todo!("dont trust this jawn as far as i can throw em");
+                    // instrs.arr
+                    // instrs.struct_set(self.module.tuple_ty_idx(*ty), field_index);
                 }
             }
         }
@@ -542,9 +583,11 @@ impl CodegenFunc<'_, '_> {
                                 let ty_idx = self.module.struct_ty_idx(ty);
                                 instrs.struct_new(ty_idx);
                             }
+                            _ => todo!("handle codegen of arrays"),
                         },
                     }
                 }
+                _ => todo!("implement codegen for copy expr arrays"),
             },
 
             bc::Rvalue::Closure { f, env } => {
@@ -608,6 +651,10 @@ impl CodegenFunc<'_, '_> {
             match elem {
                 bc::ProjectionElem::Field { index, ty } => {
                     instrs.struct_get(self.module.tuple_ty_idx(*ty), *index as u32);
+                }
+
+                bc::ProjectionElem::Index { index, ty } => {
+                    todo!("not doing wasm yet");
                 }
             }
         }

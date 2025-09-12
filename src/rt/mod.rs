@@ -38,9 +38,9 @@ use indexical::{IndexicalIteratorExt, map::DenseArcIndexMap as IndexMap};
 use itertools::Itertools;
 use log::debug;
 use wasmtime::{
-    AsContext, AsContextMut, Caller, Config, Engine, FieldType, Func, FuncType, HeapType, Linker,
-    Module, Mutability, RefType, Rooted, StorageType, Store, StoreContext, StoreContextMut,
-    StructRef, StructRefPre, StructType, Val, ValType,
+    ArrayRef, ArrayRefPre, AsContext, AsContextMut, Caller, Config, Engine, FieldType, Func,
+    FuncType, HeapType, Linker, Module, Mutability, RefType, Rooted, StorageType, Store,
+    StoreContext, StoreContextMut, StructRef, StructRefPre, StructType, Val, ValType,
 };
 
 use self::{codegen::Import, conversions::Wasmable};
@@ -71,7 +71,10 @@ pub struct RuntimeInner {
     engine: Engine,
     linker: RwLock<Linker<()>>,
     store: RwLock<Store<()>>,
+    // One allocator for each tuple type with the same underlying types
     struct_allocators: RwLock<HashMap<Vec<ValTypeEq>, StructRefPre>>,
+    // One allocator for each kind of array type (each possible inner types)
+    array_allocators: RwLock<HashMap<ValTypeEq, ArrayRefPre>>,
 
     // Rice runtime data
     functions: RwLock<HashMap<Symbol, FuncDesc>>,
@@ -139,6 +142,8 @@ macro_rules! from_val {
 
 static REFSTRUCT: LazyLock<ValType> =
     LazyLock::new(|| ValType::Ref(RefType::new(true, HeapType::Struct)));
+static REFARRAY: LazyLock<ValType> =
+    LazyLock::new(|| ValType::Ref(RefType::new(true, HeapType::Array)));
 static REFFUNC: LazyLock<ValType> =
     LazyLock::new(|| ValType::Ref(RefType::new(true, HeapType::Func)));
 static REFEXTERN: LazyLock<ValType> =
@@ -199,6 +204,7 @@ impl Runtime {
             linker: RwLock::new(linker),
             store: RwLock::new(store),
             struct_allocators: RwLock::new(HashMap::new()),
+            array_allocators: RwLock::new(HashMap::new()),
             functions: RwLock::new(HashMap::new()),
             vtables: RwLock::new(HashMap::new()),
             panic: RwLock::new(None),
@@ -312,6 +318,7 @@ impl Runtime {
                 | bc::TypeKind::Func { .. }
                 | bc::TypeKind::Struct(..)
                 | bc::TypeKind::Interface(..) => REFSTRUCT.clone(),
+                bc::TypeKind::Array(_) => REFARRAY.clone(),
                 bc::TypeKind::Hole(_) | bc::TypeKind::Self_ => unreachable!(),
             }
         }
@@ -396,6 +403,8 @@ impl Runtime {
                 let any_ref = any_ref.expect("any_ref is null");
                 if any_ref.is_struct(&store).expect("reference unrooted") {
                     REFSTRUCT.clone()
+                } else if any_ref.is_array(&store).expect("reference unrooted") {
+                    REFARRAY.clone()
                 } else {
                     unreachable!()
                 }
@@ -403,6 +412,76 @@ impl Runtime {
             Val::ExternRef(_) => REFEXTERN.clone(),
             _ => unimplemented!("{value:#?}"),
         }
+    }
+
+    fn array_allocator_mut(&self) -> RwLockWriteGuard<'_, HashMap<ValTypeEq, ArrayRefPre>> {
+        self.array_allocators.try_write().unwrap()
+    }
+
+    fn alloc_array_copy(
+        &self,
+        mut store: impl AsContextMut<Data = ()>,
+        val: Val,
+        count: Val,
+    ) -> Result<Val> {
+        let val_type: ValTypeEq = ValTypeEq(self.get_abstract_ty(store.as_context(), val));
+        let make_allocator = |val_type: &ValTypeEq| {
+            let array_ty = wasmtime::ArrayType::new(
+                &self.engine,
+                FieldType::new(Mutability::Var, StorageType::ValType(val_type.0.clone())),
+            );
+
+            ArrayRefPre::new(&mut store, array_ty)
+        };
+
+        let mut allocators = self.array_allocator_mut();
+        let allocator = allocators
+            .entry(val_type)
+            .or_insert_with_key(make_allocator);
+
+        let len: u32 = match count {
+            Val::I32(val_i32) => u32::try_from(val_i32),
+            Val::I64(val_i64) => u32::try_from(val_i64),
+            other => {
+                panic!("not sure how to get val from here... bc count is {count:?}")
+            }
+        }
+        .expect("conversion to usize should work...");
+
+        log::debug!("array val is {val:?} w/ count {count:?}");
+
+        ArrayRef::new(store, allocator, &val, len).map(|array_ref| Val::from(array_ref))
+    }
+
+    fn alloc_array_vals(
+        &self,
+        mut store: impl AsContextMut<Data = ()>,
+        vals: Vec<Val>,
+    ) -> Result<Val> {
+        assert!(!vals.is_empty());
+
+        let Some(first_val) = vals.first() else {
+            panic!("should not try to alloc empty arrays...");
+        };
+
+        let val_type: ValTypeEq = ValTypeEq(self.get_abstract_ty(store.as_context(), *first_val));
+        let make_allocator = |val_type: &ValTypeEq| {
+            let array_ty = wasmtime::ArrayType::new(
+                &self.engine,
+                FieldType::new(Mutability::Var, StorageType::ValType(val_type.0.clone())),
+            );
+
+            ArrayRefPre::new(&mut store, array_ty)
+        };
+
+        let mut allocators = self.array_allocator_mut();
+        let allocator = allocators
+            .entry(val_type)
+            .or_insert_with_key(make_allocator);
+
+        log::debug!("array vals are {vals:?}");
+
+        ArrayRef::new_fixed(store, allocator, &vals).map(|array_ref| Val::from(array_ref))
     }
 
     fn alloc_tuple(
@@ -506,6 +585,9 @@ enum MemPlace {
     /// A local in the current stack frame.
     Local(bc::LocalIdx),
 
+    /// An element of a heap-allocated array.
+    ArrayIndex(Rooted<ArrayRef>, u32),
+
     /// A field of a heap-allocated struct.
     StructField(Rooted<StructRef>, usize),
 }
@@ -560,6 +642,7 @@ impl Frame<'_> {
                 .get(local)
                 .with_context(|| format!("ICE: missing local: {local}"))?),
             MemPlace::StructField(struct_ref, i) => struct_ref.field(store!(self), i),
+            MemPlace::ArrayIndex(array_ref, i) => array_ref.get(store!(self), i),
         }
     }
 
@@ -571,11 +654,39 @@ impl Frame<'_> {
             .context("ICE: not a structref")
     }
 
+    fn array_ref(&mut self, val: Val) -> Result<Rooted<ArrayRef>> {
+        log::debug!("val is {val:?}");
+        val.any_ref()
+            .context("ICE: not an anyref")?
+            .context("ICE: null anyref")?
+            .as_array(store!(self))?
+            .context("ICE: not an arrayref")
+    }
+
     fn func_ref(&mut self, val: Val) -> Result<Func> {
         Ok(*val
             .func_ref()
             .context("ICE: not a funcref")?
             .context("ICE: funcref null")?)
+    }
+
+    fn index_from_operand(&mut self, index: &bc::Operand) -> Result<u32> {
+        let index = self.eval_operand(index)?;
+
+        match index {
+            Val::I32(val) => val
+                .try_into()
+                .with_context(|| format!("issue converting {val:?} to u32")),
+            Val::I64(val) => Err(anyhow::Error::msg(format!(
+                "cannot convert i64 val {val:?} to u32"
+            ))),
+            Val::AnyRef(anyified) => Err(anyhow::Error::msg(format!(
+                "cannot convert ANY index val {anyified:?} to u32"
+            ))),
+            other_val => Err(anyhow::Error::msg(format!(
+                "cannot convert index val {other_val:?} to u32"
+            ))),
+        }
     }
 
     /// Walks a place until reaching a final memory location described by [`MemPlace`].
@@ -587,6 +698,14 @@ impl Frame<'_> {
                 bc::ProjectionElem::Field { index, .. } => {
                     let struct_ref = self.struct_ref(val)?;
                     MemPlace::StructField(struct_ref, *index)
+                }
+                bc::ProjectionElem::Index { index, .. } => {
+                    log::debug!("trying to get indexing for index {index:?}");
+                    let array_ref = self.array_ref(val)?;
+
+                    let res = MemPlace::ArrayIndex(array_ref, self.index_from_operand(index)?);
+                    log::debug!("all good!!");
+                    res
                 }
             }
         }
@@ -601,6 +720,9 @@ impl Frame<'_> {
             }
             MemPlace::StructField(struct_ref, i) => {
                 struct_ref.set_field(store!(self), i, value)?;
+            }
+            MemPlace::ArrayIndex(array_ref, index) => {
+                array_ref.set(store!(self), index, value)?;
             }
         }
         Ok(())
@@ -720,16 +842,33 @@ impl Frame<'_> {
                 args,
                 loc: _loc,
             } => {
-                let fields = match args {
-                    bc::AllocArgs::Lit(ops) => ops
-                        .iter()
-                        .map(|el| self.eval_operand(el))
-                        .collect::<Result<Vec<_>>>()?,
-                };
+                log::debug!("eval rvalue alloc kind {kind:?}, args {args:?}");
 
-                match kind {
-                    bc::AllocKind::Tuple | bc::AllocKind::Struct => {
-                        self.rt.alloc_tuple(store!(self), fields)?
+                match args {
+                    bc::AllocArgs::Lit(ops) => {
+                        let fields = ops
+                            .iter()
+                            .map(|el| self.eval_operand(el))
+                            .collect::<Result<Vec<_>>>()?;
+
+                        match kind {
+                            bc::AllocKind::Tuple | bc::AllocKind::Struct => {
+                                self.rt.alloc_tuple(store!(self), fields)?
+                            }
+                            bc::AllocKind::Array => {
+                                self.rt.alloc_array_vals(store!(self), fields)?
+                            }
+                        }
+                    }
+                    bc::AllocArgs::Repeated { op, count } => {
+                        let bc::AllocKind::Array = *kind else {
+                            panic!("should only ever construct repeated allocations for arrays...");
+                        };
+
+                        let res = self.eval_operand(op)?;
+                        let count = self.eval_operand(count)?;
+
+                        self.rt.alloc_array_copy(store!(self), res, count)?
                     }
                 }
             }

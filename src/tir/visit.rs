@@ -45,6 +45,15 @@ pub trait VisitMut {
                     self.visit_texpr(e);
                 }
             }
+            ExprKind::Array(es) => {
+                for e in es {
+                    self.visit_texpr(e);
+                }
+            }
+            ExprKind::ArrayCopy { val, count } => {
+                self.visit_texpr(&mut *val);
+                self.visit_texpr(&mut *count);
+            }
             ExprKind::Struct(es) => {
                 for e in es {
                     self.visit_texpr(e);
@@ -52,6 +61,10 @@ pub trait VisitMut {
             }
             ExprKind::Project { e, .. } => {
                 self.visit_texpr(&mut *e);
+            }
+            ExprKind::Index { e, i } => {
+                self.visit_texpr(&mut *e);
+                self.visit_texpr(&mut *i);
             }
             ExprKind::Call { f, args } => {
                 self.visit_texpr(&mut *f);

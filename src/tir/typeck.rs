@@ -20,6 +20,12 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("empty array literal")]
+    EmptyArrayLiteral {
+        #[label]
+        span: Span,
+    },
+
     #[error("type mismatch")]
     TypeMismatch {
         expected: Type,
@@ -68,6 +74,13 @@ pub enum TypeError {
     NonNumericType {
         ty: Type,
         #[label("non-numeric type")]
+        span: Span,
+    },
+
+    #[error("type {ty} cannot be indexed into")]
+    NonIndexableType {
+        ty: Type,
+        #[label("non-indexable type")]
         span: Span,
     },
 
@@ -860,6 +873,8 @@ impl Tcx {
             ast::ExprKind::Assign { dst, src } => {
                 let src = self.check_expr(src)?;
                 let dst = self.check_expr(dst)?;
+
+                log::debug!("have assign w/ src {src} and dest {dst}");
                 self.ty_equiv(src.ty, dst.ty, dst.span)?;
 
                 (
@@ -868,6 +883,71 @@ impl Tcx {
                         src: Box::new(src),
                     },
                     Type::unit(),
+                )
+            }
+
+            ast::ExprKind::ArrayCopy { e: inner, count } => {
+                let inner = self.check_expr(inner)?;
+                let count = self.check_expr(count)?;
+
+                log::debug!("have copy w/ inner {inner} and count {count}");
+
+                // Count should be an integer
+                self.ty_equiv(Type::int(), count.ty, count.span)?;
+
+                log::debug!("first equiv passed...");
+
+                let new_arr_type = Type::array(inner.ty);
+
+                (
+                    tir::ExprKind::ArrayCopy {
+                        val: Box::new(inner),
+                        count: Box::new(count),
+                    },
+                    new_arr_type,
+                )
+            }
+
+            ast::ExprKind::ArrayLit(exprs) => {
+                // Get the tir exprs for each element.
+                let exprs = exprs
+                    .iter()
+                    .map(|expr| self.check_expr(expr))
+                    .collect::<Result<Vec<_>>>()?;
+
+                // Make sure there's at least one element.
+                ensure_let!(
+                    Some(first_ty) = exprs.first().map(|expr| expr.ty),
+                    TypeError::EmptyArrayLiteral { span: expr.span }
+                );
+
+                // And then ensure that all other types are equivalent to the first.
+                for expr in exprs.iter().skip(1) {
+                    self.ty_equiv(first_ty, expr.ty, expr.span)?;
+                }
+
+                (tir::ExprKind::Array(exprs), tir::Type::array(first_ty))
+            }
+
+            ast::ExprKind::Index { e, i } => {
+                let e = self.check_expr(e)?;
+                let i = self.check_expr(i)?;
+
+                self.ty_equiv(Type::int(), i.ty, i.span)?;
+
+                let TypeKind::Array(inner_ty) = e.ty.kind() else {
+                    bail!(TypeError::NonIndexableType {
+                        ty: e.ty,
+                        span: e.span
+                    });
+                };
+
+                (
+                    tir::ExprKind::Index {
+                        e: Box::new(e),
+                        i: Box::new(i),
+                    },
+                    *inner_ty,
                 )
             }
         };

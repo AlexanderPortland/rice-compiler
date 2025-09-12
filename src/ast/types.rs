@@ -16,6 +16,7 @@ pub enum TypeKind {
     String,
     Self_,
     Tuple(Vec<Type>),
+    Array(Type),
     Func { inputs: Vec<Type>, output: Type },
     Struct(Symbol),
     Interface(Symbol),
@@ -65,6 +66,10 @@ impl Type {
         Type(Intern::new(TypeKind::Tuple(tys)))
     }
 
+    pub fn array(inner_ty: Type) -> Self {
+        Type(Intern::new(TypeKind::Array(inner_ty)))
+    }
+
     pub fn func(inputs: Vec<Type>, output: Type) -> Self {
         Type(Intern::new(TypeKind::Func { inputs, output }))
     }
@@ -93,6 +98,7 @@ impl Type {
                 output.subst(f),
             ),
             TypeKind::Hole(hole) => f(*hole),
+            TypeKind::Array(_) => todo!("not sure how to do this yet for arrays"),
         }
     }
 }
@@ -111,6 +117,7 @@ impl TypeKind {
 
     /// Tests types for alpha-equivalence.
     pub fn equiv(&self, other: &TypeKind) -> bool {
+        log::debug!("equiv on {self}, {other}");
         match (self, other) {
             (TypeKind::Int, TypeKind::Int)
             | (TypeKind::Float, TypeKind::Float)
@@ -131,6 +138,7 @@ impl TypeKind {
                     output: output2,
                 },
             ) => inputs1.iter().zip(inputs2).all(|(t1, t2)| t1.equiv(t2)) && output1.equiv(output2),
+            (TypeKind::Array(inner_ty1), TypeKind::Array(inner_ty2)) => inner_ty1 == inner_ty2,
             _ => false,
         }
     }
@@ -268,6 +276,15 @@ pub enum ExprKind {
     Project {
         e: Box<Expr>,
         i: usize,
+    },
+    ArrayLit(Vec<Expr>),
+    ArrayCopy {
+        e: Box<Expr>,
+        count: Box<Expr>,
+    },
+    Index {
+        e: Box<Expr>,
+        i: Box<Expr>,
     },
     Binop {
         left: Box<Expr>,

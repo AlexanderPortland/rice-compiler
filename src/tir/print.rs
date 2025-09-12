@@ -63,12 +63,21 @@ impl fmt::Display for ExprKind {
                 write_comma_separated(f, es)?;
                 write!(f, ")")
             }
+            ExprKind::Array(es) => {
+                write!(f, "[")?;
+                write_comma_separated(f, es)?;
+                write!(f, "]")
+            }
+            ExprKind::ArrayCopy { val, count } => {
+                write!(f, "[|{val}x{count}|]")
+            }
             ExprKind::Struct(es) => {
                 write!(f, "(")?;
                 write_comma_separated(f, es)?;
                 write!(f, ")")
             }
             ExprKind::Project { e, i } => write!(f, "{}.{}", e, i),
+            ExprKind::Index { e, i } => write!(f, "{}[{}]", e, i),
             ExprKind::BinOp { left, right, op } => write!(f, "{} {} {}", left, op, right),
             ExprKind::Cast { e, ty } => write!(f, "{} as {}", e, ty),
             ExprKind::Call { f: func, args } => {

@@ -1,0 +1,6 @@
+fn main() {
+  let x: [int] = [|(10 + 5) / 3; 100|] in
+  println(int_to_string(x[0]));
+  println(int_to_string(x[99]));
+  println(int_to_string(x[51]))
+}

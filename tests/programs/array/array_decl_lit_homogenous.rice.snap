@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × type mismatch
+   ╭─[array_decl_lit_homogenous.rice:2:22]
+ 1 │ fn main() {
+ 2 │   let x: [int] = [0, "hello", true] in
+   ·                      ───┬───
+   ·                         ╰── expected `int`, found `string`
+ 3 │   ()
+   ╰────
+
+'''

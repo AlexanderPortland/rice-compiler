@@ -1,0 +1,7 @@
+fn main() {
+  let x: [int] = [|10; 100|] in
+  x[55] := 14;
+  println(int_to_string(x[54]));
+  println(int_to_string(x[55]));
+  println(int_to_string(x[56]))
+}

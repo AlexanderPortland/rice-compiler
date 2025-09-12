@@ -39,10 +39,19 @@ pub enum ExprKind {
     Var(Symbol),
     Const(Const),
     Tuple(Vec<Expr>),
+    Array(Vec<Expr>),
+    ArrayCopy {
+        val: Box<Expr>,
+        count: Box<Expr>,
+    },
     Struct(Vec<Expr>),
     Project {
         e: Box<Expr>,
         i: usize,
+    },
+    Index {
+        e: Box<Expr>,
+        i: Box<Expr>,
     },
     BinOp {
         left: Box<Expr>,

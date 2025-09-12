@@ -405,6 +405,32 @@ impl<'a> LowerBody<'a> {
                 });
             }
 
+            tir::ExprKind::Array(els) => {
+                log::debug!("array w/ els {els:?}");
+                let els = els
+                    .iter()
+                    .map(|el| self.lower_expr_into_tmp(el))
+                    .collect::<Vec<_>>();
+
+                add_assign!(bc::Rvalue::Alloc {
+                    kind: AllocKind::Array,
+                    loc: AllocLoc::Heap,
+                    args: AllocArgs::Lit(els)
+                });
+            }
+
+            tir::ExprKind::ArrayCopy { val, count } => {
+                log::debug!("array copy w/ val {val:?}");
+                let val = self.lower_expr_into_tmp(&val);
+                let count = self.lower_expr_into_tmp(&count);
+
+                add_assign!(bc::Rvalue::Alloc {
+                    kind: AllocKind::Array,
+                    loc: AllocLoc::Heap,
+                    args: AllocArgs::Repeated { op: val, count }
+                })
+            }
+
             tir::ExprKind::Struct(els) => {
                 let els = els
                     .iter()
@@ -428,6 +454,24 @@ impl<'a> LowerBody<'a> {
                     }],
                     expr.ty,
                 );
+                add_assign!(bc::Rvalue::Operand(bc::Operand::Place(projected)))
+            }
+
+            tir::ExprKind::Index { e, i } => {
+                let place = self.gensym(e.ty);
+                log::debug!("new place is {place}");
+                self.lower_expr_into(e, WriteDst::Place(place));
+
+                let tmp = self.lower_expr_into_tmp(&i);
+                log::debug!("tmp is {place}");
+                let projected = place.extend_projection(
+                    [ProjectionElem::Index {
+                        index: tmp,
+                        ty: e.ty,
+                    }],
+                    e.ty,
+                );
+
                 add_assign!(bc::Rvalue::Operand(bc::Operand::Place(projected)))
             }
 
@@ -508,11 +552,19 @@ impl<'a> LowerBody<'a> {
     }
 
     fn lower_place(&mut self, e: &tir::Expr, proj: &mut Vec<bc::ProjectionElem>) -> LocalIdx {
+        log::debug!("lowering place {e:?} w/ proj {proj:?}");
         match &e.kind {
             tir::ExprKind::Var(name) => self.get_local(*name, e.ty),
             tir::ExprKind::Project { e, i } => {
                 proj.push(bc::ProjectionElem::Field {
                     index: *i,
+                    ty: e.ty,
+                });
+                self.lower_place(e, proj)
+            }
+            tir::ExprKind::Index { e, i } => {
+                proj.push(bc::ProjectionElem::Index {
+                    index: self.lower_expr_into_tmp(i),
                     ty: e.ty,
                 });
                 self.lower_place(e, proj)

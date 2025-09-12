@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × index out of bounds: the length is 3 but the index is 5
+
+'''

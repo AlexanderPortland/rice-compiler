@@ -81,7 +81,13 @@ Const: Const = {
 AtomicExpr: ExprKind = {
     <name:Ident> => ExprKind::Var(name),
     <c:Const> => ExprKind::Const(c),
+    
+    "[" <exprs:Comma<Spanned<Expr>>> "]" => ExprKind::ArrayLit(exprs),
+    "[|" <e:Spanned<InfixExpr>> ";" <n:Spanned<InfixExpr>> "|]" => ExprKind::ArrayCopy { e: Box::new(e), count: Box::new(n) },
+
     <e:Spanned<AtomicExpr>> "." <i:Num> => ExprKind::Project { e: Box::new(e), i: i as usize },
+    <e:Spanned<AtomicExpr>> "[" <i:Spanned<InfixExpr>> "]" => ExprKind::Index { e: Box::new(e), i: Box::new(i) },
+
     <receiver:Spanned<AtomicExpr>> "." <method:Ident> "(" <args:Comma<Spanned<Expr>>> ")" =>
         ExprKind::MethodCall { receiver: Box::new(receiver), method, args },
 
@@ -229,6 +235,7 @@ Type: Type = {
     <name:Ident> => Type::struct_(name),
     "@" <name:Ident> => Type::interface(name),
     "(" <tys:Comma<Type>> ")" => Type::tuple(tys),
+    "[" <ty:Type> "]" => Type::array(ty),
     "fn" <sig:FnSig> => sig,    
 };
 
