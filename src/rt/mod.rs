@@ -309,6 +309,7 @@ impl Runtime {
                 bc::TypeKind::Float => ValType::F32,
                 bc::TypeKind::String => REFEXTERN.clone(),
                 bc::TypeKind::Tuple(..)
+                | bc::TypeKind::Array(_)
                 | bc::TypeKind::Func { .. }
                 | bc::TypeKind::Struct(..)
                 | bc::TypeKind::Interface(..) => REFSTRUCT.clone(),

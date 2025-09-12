@@ -16,10 +16,10 @@ use crate::{tir::Tcx, utils::Symbol};
 use itertools::Itertools;
 use std::collections::HashMap;
 use wasm_encoder::{
-    AbstractHeapType, CodeSection, ConstExpr, DataSection, ElementSection, Elements, EntityType,
-    ExportKind, ExportSection, FieldType, FuncType, Function, FunctionSection, HeapType,
-    ImportSection, InstructionSink, MemorySection, MemoryType, Module, RefType, StorageType,
-    StructType, TypeSection, ValType,
+    AbstractHeapType, ArrayType, CodeSection, ConstExpr, DataSection, ElementSection, Elements,
+    EntityType, ExportKind, ExportSection, FieldType, FuncType, Function, FunctionSection,
+    HeapType, ImportSection, InstructionSink, MemorySection, MemoryType, Module, RefType,
+    StorageType, StructType, TypeSection, ValType,
 };
 
 use crate::bc::types as bc;
@@ -67,6 +67,7 @@ pub fn codegen<'a>(
         func_name_to_code_idx: HashMap::new(),
         types: TypeSection::new(),
         struct_ty_idx: HashMap::new(),
+        array_ty_idx: HashMap::new(),
         data: DataSection::new(),
         data_offset: 0,
         func_refs: Vec::new(),
@@ -119,6 +120,7 @@ struct CodegenModule<'a> {
     func_name_to_code_idx: HashMap<Symbol, u32>,
     types: TypeSection,
     struct_ty_idx: HashMap<StructType, u32>,
+    array_ty_idx: HashMap<StorageType, u32>,
     data: DataSection,
     data_offset: u32,
     func_refs: Vec<u32>,
@@ -251,6 +253,20 @@ impl CodegenModule<'_> {
         }
     }
 
+    fn wasm_array_ty_idx(&mut self, ty: StorageType) -> u32 {
+        match self.array_ty_idx.get(&ty) {
+            Some(idx) => *idx,
+            None => {
+                self.types
+                    .ty()
+                    .array(&ty, true /* structs mutable by default */);
+                let idx = self.types.len() - 1;
+                self.array_ty_idx.insert(ty, idx);
+                idx
+            }
+        }
+    }
+
     fn interface_ty_idx(&mut self, intf: Symbol) -> u32 {
         let methods = &self.tcx.globals().intfs[&intf];
         let fields = methods
@@ -303,6 +319,17 @@ impl CodegenModule<'_> {
         self.wasm_struct_ty_idx(struct_type)
     }
 
+    fn array_ty_idx(&mut self, ty: bc::Type) -> u32 {
+        let bc::TypeKind::Array(arr_ty) = ty.kind() else {
+            panic!("{ty:?} is not an array")
+        };
+
+        let new_ty = StorageType::Val(self.gen_ty(*arr_ty));
+        self.types.ty().array(&new_ty, true);
+        // wasmtime::ArrayType::new(self., field_type)
+        todo!();
+    }
+
     fn closure_ty_idx(&mut self) -> u32 {
         let fields = Box::new([
             FieldType {
@@ -333,6 +360,13 @@ impl CodegenModule<'_> {
                         nullable: true,
                     })
                 }
+            }
+            bc::TypeKind::Array(inner_ty) => {
+                let idx = self.array_ty_idx(ty);
+                ValType::Ref(RefType {
+                    nullable: true,
+                    heap_type: HeapType::Concrete(idx),
+                })
             }
             bc::TypeKind::Func { .. } => ValType::Ref(RefType {
                 heap_type: HeapType::Concrete(self.closure_ty_idx()),

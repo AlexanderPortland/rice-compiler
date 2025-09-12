@@ -16,6 +16,7 @@ pub enum TypeKind {
     String,
     Self_,
     Tuple(Vec<Type>),
+    Array(Type),
     Func { inputs: Vec<Type>, output: Type },
     Struct(Symbol),
     Interface(Symbol),
@@ -65,6 +66,10 @@ impl Type {
         Type(Intern::new(TypeKind::Tuple(tys)))
     }
 
+    pub fn array(ty: Type) -> Self {
+        Type(Intern::new(TypeKind::Array(ty)))
+    }
+
     pub fn func(inputs: Vec<Type>, output: Type) -> Self {
         Type(Intern::new(TypeKind::Func { inputs, output }))
     }
@@ -93,6 +98,7 @@ impl Type {
                 output.subst(f),
             ),
             TypeKind::Hole(hole) => f(*hole),
+            TypeKind::Array(_) => todo!("not sure how to do this yet for arrays"),
         }
     }
 }
@@ -268,6 +274,15 @@ pub enum ExprKind {
     Project {
         e: Box<Expr>,
         i: usize,
+    },
+    ArrayLit(Vec<Expr>),
+    ArrayCopy {
+        e: Box<Expr>,
+        count: Box<Expr>,
+    },
+    Index {
+        e: Box<Expr>,
+        i: Box<Expr>,
     },
     Binop {
         left: Box<Expr>,
