@@ -4,9 +4,12 @@ fn main() {
     println("b");
     loop {
       println("c");
-      break
+      break;
+      println("c2")
     };
-    break
+    println("b2");
+    break;
+    println("b3")
   };
   println("d")
 }

@@ -317,9 +317,13 @@ impl<'a> LowerBody<'a> {
             }
 
             tir::ExprKind::Break => {
-                log::debug!("doign break...");
                 // gtfo and get a wholly new block
-                let break_to = self.break_to_block.first();
+                let break_to = self.break_to_block.last();
+                log::debug!(
+                    "doign break... w/ {:?} to {:?}",
+                    self.break_to_block,
+                    break_to
+                );
                 let break_to = *break_to
                     .expect("if this fails, we don't have anything on the break to stack :(");
 
