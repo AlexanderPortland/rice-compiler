@@ -1,0 +1,8 @@
+fn main() {
+  let y = 0 in
+  loop {
+    y := y + 1;
+    if y > 5 { break } else { () }
+  };
+  println(int_to_string(y))
+}

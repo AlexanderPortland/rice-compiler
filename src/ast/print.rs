@@ -153,6 +153,7 @@ impl fmt::Display for ExprKind {
             ExprKind::Project { e, i } => write!(f, "{}.{}", e, i),
             ExprKind::Cast { e, ty } => write!(f, "{} as {}", e, ty),
             ExprKind::Loop(body) => write!(f, "loop {{\n{}\n}}", indent(format!("{}", body))),
+            ExprKind::Break => write!(f, "break"),
             ExprKind::While { cond, body } => {
                 write!(f, "while {} {{\n{}\n}}", cond, indent(format!("{}", body)))
             }

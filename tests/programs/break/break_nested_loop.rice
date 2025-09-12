@@ -1,0 +1,15 @@
+fn main() {
+  println("a");
+  loop {
+    println("b");
+    loop {
+      println("c");
+      break;
+      println("c2")
+    };
+    println("b2");
+    break;
+    println("b3")
+  };
+  println("d")
+}

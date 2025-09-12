@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × break outside loop
+   ╭─[break_outside_loop.rice:3:3]
+ 2 │   let x = 1 in
+ 3 │   break // error
+   ·   ──┬──
+   ·     ╰── found at
+ 4 │ }
+   ╰────
+
+'''

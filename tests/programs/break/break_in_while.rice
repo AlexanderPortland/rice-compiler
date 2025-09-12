@@ -1,0 +1,8 @@
+fn main() {
+  let x = 0 in
+  while x < 10 {
+    x := x + 1;
+    if x >= 5 { break } else { () }
+  };
+  println(int_to_string(x))
+}

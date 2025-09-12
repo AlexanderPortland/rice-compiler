@@ -1,0 +1,10 @@
+fn main() {
+  let y = 2 in
+  loop {
+    let x: () = if y == 2 { break } else { () } in
+    let y: () = if y == 2 { () } else { break } in
+    println("hello");
+    x
+  };
+  println("world")
+}

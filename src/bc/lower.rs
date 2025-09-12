@@ -111,6 +111,7 @@ struct LowerBody<'a> {
     tcx: &'a Tcx,
     locals: IndexedDomain<Local>,
     name_map: HashMap<Symbol, LocalIdx>,
+    break_to_block: Vec<bc::BasicBlockIdx>,
     graph: PartialCfg,
     cur_block: Vec<bc::Statement>,
     start_block: bc::BasicBlockIdx,
@@ -152,6 +153,7 @@ impl<'a> LowerBody<'a> {
             locals: IndexedDomain::new(),
             name_map: HashMap::new(),
             cur_block: Vec::new(),
+            break_to_block: Vec::new(),
             cur_loc: start_block,
             start_block,
         };
@@ -206,6 +208,10 @@ impl<'a> LowerBody<'a> {
             statements,
             terminator,
         };
+        log::debug!(
+            "just finished basic block {:?} -- {cur_block}",
+            self.cur_loc
+        );
         match cur_block.terminator.kind() {
             bc::TerminatorKind::Jump(dst) => {
                 self.graph.add_edge(self.cur_loc.into(), (*dst).into(), ());
@@ -310,9 +316,37 @@ impl<'a> LowerBody<'a> {
                 );
             }
 
+            tir::ExprKind::Break => {
+                let break_to = *self.break_to_block.last().expect(
+                    "if this fails, we don't have anything on the break to stack :(, \
+                            so this should be caught by type checking",
+                );
+
+                let new_block = self.new_block();
+                self.finish_block(
+                    new_block,
+                    bc::Terminator {
+                        kind: bc::TerminatorKind::Jump(break_to),
+                        span: crate::ast::types::Span::DUMMY,
+                    },
+                );
+
+                add_assign!(bc::Rvalue::Alloc {
+                    kind: AllocKind::Tuple,
+                    loc: AllocLoc::Heap,
+                    args: AllocArgs::Lit(Vec::new())
+                });
+            }
+
             tir::ExprKind::Loop(body) => {
                 let header_block = self.new_block();
                 let footer_block = self.new_block();
+
+                log::debug!(
+                    "looping w/ header {:?} and footer {:?}",
+                    header_block,
+                    footer_block
+                );
 
                 self.finish_block(
                     header_block,
@@ -322,7 +356,14 @@ impl<'a> LowerBody<'a> {
                     },
                 );
 
+                // we want all calls to break in here to break to the footer
+                self.break_to_block.push(footer_block);
+
                 self.lower_expr_into(body, op);
+
+                // we should be back at the same spot on the stack
+                let removed = self.break_to_block.pop();
+                assert_eq!(removed, Some(footer_block));
 
                 self.finish_block(
                     footer_block,

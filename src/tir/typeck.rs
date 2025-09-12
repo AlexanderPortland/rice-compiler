@@ -28,6 +28,12 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error("break outside loop")]
+    BreakOutsideLoop {
+        #[label("found at")]
+        span: Span,
+    },
+
     #[error("type mismatch")]
     TypeMismatchCustom {
         expected: String,
@@ -157,6 +163,7 @@ pub struct Globals {
 /// Type context contains info accumulated while type-checking, such as [`Globals`].
 pub struct Tcx {
     globals: Globals,
+    loop_count: usize,
 }
 
 /// A predicate which must hold on a concrete type, excluding equality.
@@ -213,6 +220,7 @@ impl Tcx {
     pub fn new() -> Self {
         let mut tcx = Tcx {
             globals: Globals::default(),
+            loop_count: 0,
         };
 
         // Load stdlib into the type context
@@ -424,6 +432,19 @@ impl Tcx {
 
     fn ty_constraint(&mut self, constraint: TypeConstraint, ty: Type, span: Span) -> Result<()> {
         constraint.satisfied_by(ty, span, &self.globals)
+    }
+
+    fn enter_loop(&mut self) {
+        self.loop_count += 1;
+    }
+
+    fn in_loop(&self) -> bool {
+        self.loop_count >= 1
+    }
+
+    fn exit_loop(&mut self) {
+        assert!(self.loop_count >= 1);
+        self.loop_count -= 1;
     }
 
     fn check_expr(&mut self, expr: &ast::Expr) -> Result<Expr> {
@@ -762,14 +783,29 @@ impl Tcx {
             }
 
             ast::ExprKind::Loop(body) => {
+                self.enter_loop();
                 let body = self.check_expr(body)?;
+                self.exit_loop();
                 (tir::ExprKind::Loop(Box::new(body)), Type::unit())
+            }
+
+            ast::ExprKind::Break => {
+                // if we're not in a loop, that's an error...
+                ensure!(
+                    self.in_loop(),
+                    TypeError::BreakOutsideLoop { span: expr.span }
+                );
+                (tir::ExprKind::Break, Type::unit())
             }
 
             ast::ExprKind::While { cond, body } => {
                 let cond = self.check_expr(cond)?;
                 self.ty_equiv(Type::bool(), cond.ty, cond.span)?;
+
+                self.enter_loop();
                 let body = self.check_expr(body)?;
+                self.exit_loop();
+
                 (
                     tir::ExprKind::While {
                         cond: Box::new(cond),
