@@ -801,7 +801,11 @@ impl Tcx {
             ast::ExprKind::While { cond, body } => {
                 let cond = self.check_expr(cond)?;
                 self.ty_equiv(Type::bool(), cond.ty, cond.span)?;
+
+                self.enter_loop();
                 let body = self.check_expr(body)?;
+                self.exit_loop();
+
                 (
                     tir::ExprKind::While {
                         cond: Box::new(cond),
