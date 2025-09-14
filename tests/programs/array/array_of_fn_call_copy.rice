@@ -1,0 +1,5 @@
+fn main() {
+  let x: [int] = [|(let y = 10 in println("hello"); y); let y = 10 in println("hi"); y|] in
+  println(int_to_string(x[0])); // should be 10
+  println(int_to_string(x[1]))  // should be 10
+}

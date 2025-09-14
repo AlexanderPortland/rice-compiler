@@ -325,9 +325,7 @@ impl CodegenModule<'_> {
         };
 
         let new_ty = StorageType::Val(self.gen_ty(*arr_ty));
-        self.types.ty().array(&new_ty, true);
-        // wasmtime::ArrayType::new(self., field_type)
-        todo!();
+        self.wasm_array_ty_idx(new_ty)
     }
 
     fn closure_ty_idx(&mut self) -> u32 {
@@ -361,7 +359,7 @@ impl CodegenModule<'_> {
                     })
                 }
             }
-            bc::TypeKind::Array(inner_ty) => {
+            bc::TypeKind::Array(_inner_ty) => {
                 let idx = self.array_ty_idx(ty);
                 ValType::Ref(RefType {
                     nullable: true,
@@ -449,7 +447,10 @@ impl CodegenFunc<'_, '_> {
                     bc::ProjectionElem::Field { index, ty } => {
                         instrs.struct_get(self.module.tuple_ty_idx(*ty), *index as u32);
                     }
-                    bc::ProjectionElem::Index { index, ty } => {}
+                    bc::ProjectionElem::Index { index, ty } => {
+                        self.gen_operand(index, instrs);
+                        instrs.array_get(self.module.array_ty_idx(*ty));
+                    }
                 }
             }
 
@@ -459,10 +460,9 @@ impl CodegenFunc<'_, '_> {
                     instrs.struct_set(self.module.tuple_ty_idx(*ty), *index as u32);
                 }
                 bc::ProjectionElem::Index { index, ty } => {
+                    self.gen_operand(index, instrs);
                     self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
-                    todo!("dont trust this jawn as far as i can throw em");
-                    // instrs.arr
-                    // instrs.struct_set(self.module.tuple_ty_idx(*ty), field_index);
+                    instrs.array_set(self.module.array_ty_idx(*ty));
                 }
             }
         }
@@ -583,11 +583,31 @@ impl CodegenFunc<'_, '_> {
                                 let ty_idx = self.module.struct_ty_idx(ty);
                                 instrs.struct_new(ty_idx);
                             }
-                            _ => todo!("handle codegen of arrays"),
+                            bc::AllocKind::Array => {
+                                let ty_idx = self.module.array_ty_idx(ty);
+                                instrs.array_new_fixed(
+                                    ty_idx,
+                                    u32::try_from(ops.len())
+                                        .expect("shouldn't have anything this large..."),
+                                );
+                            }
                         },
                     }
                 }
-                _ => todo!("implement codegen for copy expr arrays"),
+                bc::AllocArgs::Repeated { op, count } => {
+                    self.gen_operand(op, instrs);
+                    self.gen_operand(count, instrs);
+                    match loc {
+                        bc::AllocLoc::Stack => unimplemented!(),
+                        bc::AllocLoc::Heap => match kind {
+                            bc::AllocKind::Array => {
+                                let ty_idx = self.module.array_ty_idx(ty);
+                                instrs.array_new(ty_idx);
+                            }
+                            _ => unreachable!("only arrays can be allocated with repeated values"),
+                        },
+                    }
+                }
             },
 
             bc::Rvalue::Closure { f, env } => {
@@ -654,7 +674,9 @@ impl CodegenFunc<'_, '_> {
                 }
 
                 bc::ProjectionElem::Index { index, ty } => {
-                    todo!("not doing wasm yet");
+                    self.gen_operand(index, instrs);
+                    instrs.array_get(self.module.array_ty_idx(*ty));
+                    // todo!("not doing wasm yet");
                 }
             }
         }

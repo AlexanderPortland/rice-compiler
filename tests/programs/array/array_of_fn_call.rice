@@ -1,0 +1,6 @@
+fn main() {
+  let x: [string] = [int_to_string(0 + 1), int_to_string(0 + 1 + 1), int_to_string(0 + 1 + 1 + 1)] in
+  println(x[0]); // should be 1
+  println(x[1]); // should be 2
+  println(x[2])  // should be 3
+}

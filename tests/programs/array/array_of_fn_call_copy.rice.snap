@@ -4,10 +4,9 @@ expression: output
 ---
 success = true
 stdout = '''
-3
-4
-1
-2
-3
+hello
+hi
+10
+10
 '''
 stderr = ''

@@ -83,10 +83,10 @@ AtomicExpr: ExprKind = {
     <c:Const> => ExprKind::Const(c),
     
     "[" <exprs:Comma<Spanned<Expr>>> "]" => ExprKind::ArrayLit(exprs),
-    "[|" <e:Spanned<InfixExpr>> ";" <n:Spanned<InfixExpr>> "|]" => ExprKind::ArrayCopy { e: Box::new(e), count: Box::new(n) },
+    "[|" <e:Spanned<StmtExpr>> ";" <n:Spanned<Expr>> "|]" => ExprKind::ArrayCopy { e: Box::new(e), count: Box::new(n) },
 
     <e:Spanned<AtomicExpr>> "." <i:Num> => ExprKind::Project { e: Box::new(e), i: i as usize },
-    <e:Spanned<AtomicExpr>> "[" <i:Spanned<InfixExpr>> "]" => ExprKind::Index { e: Box::new(e), i: Box::new(i) },
+    <e:Spanned<AtomicExpr>> "[" <i:Spanned<Expr>> "]" => ExprKind::Index { e: Box::new(e), i: Box::new(i) },
 
     <receiver:Spanned<AtomicExpr>> "." <method:Ident> "(" <args:Comma<Spanned<Expr>>> ")" =>
         ExprKind::MethodCall { receiver: Box::new(receiver), method, args },

@@ -442,7 +442,7 @@ impl Runtime {
         let len: u32 = match count {
             Val::I32(val_i32) => u32::try_from(val_i32),
             Val::I64(val_i64) => u32::try_from(val_i64),
-            other => {
+            _other => {
                 panic!("not sure how to get val from here... bc count is {count:?}")
             }
         }
@@ -481,7 +481,7 @@ impl Runtime {
 
         log::debug!("array vals are {vals:?}");
 
-        ArrayRef::new_fixed(store, allocator, &vals).map(|array_ref| Val::from(array_ref))
+        ArrayRef::new_fixed(store, allocator, &vals).map(Val::from)
     }
 
     fn alloc_tuple(

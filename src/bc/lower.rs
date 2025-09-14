@@ -327,7 +327,7 @@ impl<'a> LowerBody<'a> {
                     new_block,
                     bc::Terminator {
                         kind: bc::TerminatorKind::Jump(break_to),
-                        span: crate::ast::types::Span::DUMMY,
+                        span: expr.span,
                     },
                 );
 
