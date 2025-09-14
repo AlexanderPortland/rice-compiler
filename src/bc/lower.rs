@@ -529,10 +529,7 @@ impl<'a> LowerBody<'a> {
             }
 
             tir::ExprKind::Assign { dst, src } => {
-                let ty = dst.ty;
-                let mut proj = Vec::new();
-                let local = self.lower_place(dst, &mut proj);
-                let place = bc::Place::new(local, proj, ty);
+                let place = self.lower_place(dst);
                 self.lower_expr_into(src, WriteDst::Place(place));
                 add_assign!(bc::Rvalue::Alloc {
                     kind: AllocKind::Tuple,
@@ -551,7 +548,7 @@ impl<'a> LowerBody<'a> {
         }
     }
 
-    fn lower_place(&mut self, e: &tir::Expr, proj: &mut Vec<bc::ProjectionElem>) -> LocalIdx {
+    fn lower_place_impl(&mut self, e: &tir::Expr, proj: &mut Vec<bc::ProjectionElem>) -> LocalIdx {
         log::debug!("lowering place {e:?} w/ proj {proj:?}");
         match &e.kind {
             tir::ExprKind::Var(name) => self.get_local(*name, e.ty),
@@ -560,16 +557,23 @@ impl<'a> LowerBody<'a> {
                     index: *i,
                     ty: e.ty,
                 });
-                self.lower_place(e, proj)
+                self.lower_place_impl(e, proj)
             }
             tir::ExprKind::Index { e, i } => {
                 proj.push(bc::ProjectionElem::Index {
                     index: self.lower_expr_into_tmp(i),
                     ty: e.ty,
                 });
-                self.lower_place(e, proj)
+                self.lower_place_impl(e, proj)
             }
             _ => panic!("invalid place: {e:?}"),
         }
+    }
+
+    fn lower_place(&mut self, e: &tir::Expr) -> bc::Place {
+        let mut proj = Vec::new();
+        let local = self.lower_place_impl(e, &mut proj);
+        proj.reverse();
+        bc::Place::new(local, proj, e.ty)
     }
 }
