@@ -1,0 +1,4 @@
+fn main() {
+  let x: _ = [1, 2, 3] in
+  println(int_to_string(x[2]))
+}
