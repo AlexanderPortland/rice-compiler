@@ -7,7 +7,10 @@ use thiserror::Error;
 
 use crate::{
     ast::types::{self as ast, Item, MethodSig, Span},
-    tir::types::{self as tir, Binop, Expr, ImplRef, MethodRef, Type, TypeKind},
+    tir::{
+        typeck::inference::InferenceCtx,
+        types::{self as tir, Binop, Expr, ImplRef, MethodRef, Type, TypeKind},
+    },
     utils::{Symbol, sym},
 };
 
@@ -956,5 +959,110 @@ impl Tcx {
             ty,
             span: expr.span,
         })
+    }
+}
+
+mod inference {
+    use std::collections::HashMap;
+
+    use petgraph::unionfind::UnionFind;
+
+    use super::Result;
+
+    use crate::bc::types::Type;
+
+    pub struct InferenceCtx {
+        /// A union to keep track of which holes are equal
+        hole_eq: UnionFind<usize>,
+
+        /// A hashmap to keep track of what types those leading holes correspond to
+        hole_val: HashMap<usize, Type>,
+    }
+
+    use crate::bc::types::TypeKind;
+
+    impl InferenceCtx {
+        fn new() -> Self {
+            InferenceCtx {
+                hole_eq: UnionFind::new_empty(),
+                hole_val: HashMap::new(),
+            }
+        }
+
+        fn unify(&mut self, a: Type, b: Type) -> Result<()> {
+            let a = self.normalize(&a);
+            let b = self.normalize(&b);
+
+            match (a.kind(), b.kind()) {
+                (TypeKind::Hole(hole_a), TypeKind::Hole(hole_b)) => self.union(*hole_a, *hole_b),
+                (TypeKind::Hole(hole), _known) => self.set_val(hole, &b),
+                (_known, TypeKind::Hole(hole)) => self.set_val(hole, &a),
+                (TypeKind::Array(a1), TypeKind::Array(a2)) => self.unify(*a1, *a2),
+                (TypeKind::Tuple(t1), TypeKind::Tuple(t2)) => {
+                    assert!(t1.len() == t2.len());
+                    for (t1, t2) in t1.iter().zip(t2.iter()) {
+                        self.unify(*t1, *t2)?;
+                    }
+                    Ok(())
+                }
+                (prim1, prim2) => {
+                    assert!(prim1.equiv(prim2));
+                    Ok(())
+                }
+            }
+        }
+
+        fn normalize(&self, ty: &Type) -> Type {
+            // replace each hole using the helper they provide...
+            let mut replace_hole = |hole| self.find_or_keep_as_hole(hole);
+            ty.subst(&mut replace_hole)
+        }
+
+        /// Unions two holes to be equal
+        fn union(&mut self, a: usize, b: usize) -> Result<()> {
+            let old_type = match (self.find(&a), self.find(&b)) {
+                (Some(t1), Some(t2)) => {
+                    assert_eq!(t1, t2, "types of unioned groups should be equal");
+                    Some(t1)
+                }
+                (Some(known), None) | (None, Some(known)) => Some(known),
+                _ => None,
+            };
+
+            self.hole_eq.union(a, b);
+            if let Some(old_type) = old_type {
+                let new_rep = self.hole_eq.find(a);
+                self.set_val(&new_rep, &old_type);
+            }
+
+            Ok(())
+        }
+
+        fn set_val(&mut self, hole: &usize, ty: &Type) -> Result<()> {
+            let rep = self.hole_eq.find(*hole);
+
+            if let Some(existing) = self.hole_val.insert(rep, *ty) {
+                assert_eq!(
+                    existing, *ty,
+                    "shouldn't be changing the existing value of a type"
+                );
+            }
+            Ok(())
+        }
+
+        fn find_or_keep_as_hole(&self, hole: usize) -> Type {
+            match self.find(&hole) {
+                Some(known_type) => known_type,
+                None => Type::hole(hole),
+            }
+        }
+
+        /// Finds the type for a given hole, if we have one
+        fn find(&self, hole: &usize) -> Option<Type> {
+            self.hole_eq
+                .try_find(*hole)
+                .map(|rep_hole| self.hole_val.get(&rep_hole).cloned())
+                .flatten()
+        }
     }
 }
