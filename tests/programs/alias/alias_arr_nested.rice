@@ -1,0 +1,11 @@
+fn main() {
+  let x = [1, 2, 3] in
+  let y = [x, x] in
+  y[0][0] := 13;
+  println(int_to_string(x[0]));
+  println(int_to_string(x[1]));
+  println(int_to_string(y[0][0]));
+  println(int_to_string(y[0][1]));
+  println(int_to_string(y[1][0]));
+  println(int_to_string(y[1][1]))
+}

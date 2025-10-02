@@ -1,0 +1,9 @@
+fn foo() -> _ {
+  let x: string = "hello" in
+  let y: _ = " alex" in
+  x ^ y
+}
+
+fn main() {
+  println(foo())
+}

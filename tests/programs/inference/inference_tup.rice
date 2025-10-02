@@ -1,0 +1,5 @@
+fn main() {
+  let x: _ = (1, "hello") in
+  println(int_to_string(x.0));
+  println(x.1)
+}

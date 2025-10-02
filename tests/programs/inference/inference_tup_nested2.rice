@@ -1,0 +1,7 @@
+fn main() {
+  let x1: _ = (1, 2) in
+  let x2: _ = (1, 2) in
+  let y: _ = (x1, x2) in
+  let z: _ = (y.1).0 in
+  println(int_to_string(z))
+}

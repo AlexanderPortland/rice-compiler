@@ -1,0 +1,7 @@
+fn main() {
+  let x = (1, 1) in
+  let y = x in
+  y.1 := 2;
+  println(int_to_string(x.0));
+  println(int_to_string(x.1))
+}

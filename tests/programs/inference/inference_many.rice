@@ -1,0 +1,7 @@
+fn main() {
+  let x: _ = [1, 2, 3] in
+  let y: _ = ["hi", "alex"] in
+  let z: _ = (x, y) in
+  let v: _ = (z.1)[1] in
+  println(v)
+}

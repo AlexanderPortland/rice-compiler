@@ -1,0 +1,11 @@
+fn main() {
+  ()
+}
+
+// can we get information about x based on it being passed into this closure...
+fn foo(x: _) {
+  let y = 88 in
+  let f: _ = \(z : _) -> _. z + y in
+  f(x);
+  ()
+}

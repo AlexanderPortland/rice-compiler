@@ -1,0 +1,8 @@
+fn foo(x: _) -> _ {
+  x
+}
+
+fn main() {
+  println(int_to_string(foo(42)));
+  println(foo("hello"))
+}

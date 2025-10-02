@@ -1,0 +1,8 @@
+fn main() {
+  let x: _ = ("hi", 1) in
+  println(int_to_string(x.1))
+}
+
+fn foo(x: _) -> int {
+  x.1
+}

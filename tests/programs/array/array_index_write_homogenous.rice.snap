@@ -10,7 +10,7 @@ Error:   × type mismatch
  2 │   let x: [int] = [0, 1, 2] in
  3 │   x[1] := "hello";
    ·   ──┬─
-   ·     ╰── expected `string`, found `int`
+   ·     ╰── expected `int`, found `string`
  4 │   println(int_to_string(x[0]));
    ╰────
 

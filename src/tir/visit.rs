@@ -21,6 +21,7 @@ pub trait VisitMut {
         for (_, ty) in &mut func.params {
             self.visit_type(ty);
         }
+        self.visit_type(&mut func.ret_ty);
         self.visit_texpr(&mut func.body);
     }
 
