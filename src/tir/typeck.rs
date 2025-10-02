@@ -3,7 +3,6 @@
 use itertools::Itertools;
 use miette::{Diagnostic, Result, bail, ensure};
 use std::{
-    cell::Cell,
     collections::{HashMap, HashSet},
     sync::atomic::AtomicUsize,
 };
@@ -605,8 +604,11 @@ impl Tcx {
                 let projected_ty = if let TypeKind::Hole(_hole) = e.ty.kind() {
                     // if we dont know what the type we're projecting on is yet...
                     let ret_ty = self.new_hole();
-                    self.inference
-                        .add_goal(ret_ty, inference::GoalRValue::Project(e.ty, *i));
+                    self.inference.add_goal(inference::Goal::Project {
+                        tup_ty: e.ty,
+                        el_ty: ret_ty,
+                        index: *i,
+                    });
 
                     ret_ty
                 } else {
@@ -622,7 +624,7 @@ impl Tcx {
                             );
                             tys
                         }
-                        TypeKind::Hole(hole) => unreachable!("should have handled below"),
+                        TypeKind::Hole(_) => unreachable!("should have handled below"),
                         _ => bail!(TypeError::InvalidProjectionType {
                             ty: e.ty,
                             span: e.span
@@ -650,40 +652,53 @@ impl Tcx {
 
             ast::ExprKind::Call { f, args } => {
                 let f = self.check_expr(f)?;
-                ensure_let!(
-                    TypeKind::Func { inputs, output } = f.ty.kind(),
-                    TypeError::TypeMismatchCustom {
-                        expected: "function".into(),
-                        actual: f.ty,
-                        span: f.span
-                    }
-                );
-
-                ensure!(
-                    args.len() == inputs.len(),
-                    TypeError::WrongNumArgs {
-                        expected: inputs.len(),
-                        actual: args.len(),
-                        span: expr.span
-                    }
-                );
-
                 let args = args
                     .iter()
-                    .zip_eq(inputs)
-                    .map(|(arg, param_ty)| {
-                        let e = self.check_expr(arg)?;
-                        self.ty_equiv(e.ty, *param_ty, e.span)?;
-                        Ok(e)
-                    })
+                    .map(|arg| self.check_expr(arg))
                     .collect::<Result<Vec<_>>>()?;
+
+                let output = if let TypeKind::Hole(_hole) = f.ty.kind() {
+                    let output_ty = self.new_hole();
+
+                    self.inference.add_goal(inference::Goal::Callable {
+                        f_ty: f.ty,
+                        arg_tys: args.iter().map(|arg| arg.ty).collect(),
+                        ret_ty: output_ty,
+                    });
+
+                    output_ty
+                } else {
+                    ensure_let!(
+                        TypeKind::Func { inputs, output } = f.ty.kind(),
+                        TypeError::TypeMismatchCustom {
+                            expected: "function".into(),
+                            actual: f.ty,
+                            span: f.span
+                        }
+                    );
+
+                    ensure!(
+                        args.len() == inputs.len(),
+                        TypeError::WrongNumArgs {
+                            expected: inputs.len(),
+                            actual: args.len(),
+                            span: expr.span
+                        }
+                    );
+
+                    for (arg, input_arg_ty) in args.iter().zip_eq(inputs) {
+                        self.ty_equiv(arg.ty, *input_arg_ty, arg.span)?;
+                    }
+
+                    *output
+                };
 
                 (
                     tir::ExprKind::Call {
                         f: Box::new(f),
                         args,
                     },
-                    *output,
+                    output,
                 )
             }
 
@@ -988,8 +1003,10 @@ impl Tcx {
                     TypeKind::Array(inner_ty) => *inner_ty,
                     TypeKind::Hole(_hole) => {
                         let ret_ty = self.new_hole();
-                        self.inference
-                            .add_goal(ret_ty, inference::GoalRValue::Index(e.ty));
+                        self.inference.add_goal(inference::Goal::Index {
+                            arr_ty: e.ty,
+                            el_ty: ret_ty,
+                        });
                         ret_ty
                     }
                     _ => bail!(TypeError::NonIndexableType {
@@ -1032,13 +1049,25 @@ mod inference {
     #[derive(Debug, Default)]
     pub struct InferenceCtx {
         types: HashMap<Type, Option<Type>>,
-        goals: Vec<(Type, GoalRValue)>,
+        goals: Vec<Goal>,
     }
 
-    #[derive(Debug, Copy, Clone)]
-    pub enum GoalRValue {
-        Index(Type),
-        Project(Type, usize),
+    #[derive(Debug, Clone)]
+    pub enum Goal {
+        /// Asserts that `arr[_] = el_ty`.
+        Index { arr_ty: Type, el_ty: Type },
+        /// Asserts that `tup.index = el_ty`.
+        Project {
+            tup_ty: Type,
+            el_ty: Type,
+            index: usize,
+        },
+        /// Asserts that `f(args) = ret`.
+        Callable {
+            f_ty: Type,
+            arg_tys: Vec<Type>,
+            ret_ty: Type,
+        },
     }
 
     #[derive(Diagnostic, Error, Debug)]
@@ -1054,9 +1083,7 @@ mod inference {
     impl VisitMut for InferenceCtx {
         fn visit_type(&mut self, ty: &mut Type) {
             // replace only the holes
-            let old = *ty;
             *ty = self.normalize(ty);
-            // println!("{old:?} -> {:?}", ty);
         }
     }
 
@@ -1071,14 +1098,14 @@ mod inference {
                 // println!("starting w/ goals {:?}", self.goals);
 
                 // apply all the rules we know
-                for (ty, rvalue) in &self.goals.clone() {
-                    match rvalue {
-                        GoalRValue::Index(arr_ty) => {
+                for goal in &self.goals.clone() {
+                    match goal {
+                        Goal::Index { arr_ty, el_ty } => {
                             let arr_ty = self.normalize(arr_ty);
                             match arr_ty.kind() {
-                                TypeKind::Hole(_) => remaining_goals.push((*ty, *rvalue)),
+                                TypeKind::Hole(_) => remaining_goals.push(goal.clone()),
                                 TypeKind::Array(inner) => {
-                                    self.unify(*ty, *inner)?;
+                                    self.unify(*el_ty, *inner)?;
                                 }
                                 _ => bail!(TypeError::NonIndexableType {
                                     ty: arr_ty,
@@ -1086,24 +1113,59 @@ mod inference {
                                 }),
                             }
                         }
-                        GoalRValue::Project(tup_ty, index) => {
+                        Goal::Project {
+                            tup_ty,
+                            el_ty,
+                            index,
+                        } => {
                             let tup_ty = self.normalize(tup_ty);
                             match tup_ty.kind() {
-                                TypeKind::Hole(_) => remaining_goals.push((*ty, *rvalue)),
+                                TypeKind::Hole(_) => remaining_goals.push(goal.clone()),
                                 TypeKind::Tuple(inner_ty) => {
                                     let index = *index;
                                     ensure!(
-                                        index <= inner_ty.len(),
+                                        index < inner_ty.len(),
                                         TypeError::InvalidProjectionIndex {
                                             index,
                                             span: Span::DUMMY
                                         }
                                     );
-                                    self.unify(*ty, inner_ty[index])?;
+                                    self.unify(*el_ty, inner_ty[index])?;
                                 }
                                 _ => bail!(TypeError::InvalidProjectionType {
                                     ty: tup_ty,
                                     span: Span::DUMMY
+                                }),
+                            }
+                        }
+                        Goal::Callable {
+                            f_ty,
+                            arg_tys,
+                            ret_ty,
+                        } => {
+                            let f_ty = self.normalize(f_ty);
+                            match f_ty.kind() {
+                                TypeKind::Func { inputs, output } => {
+                                    ensure!(
+                                        arg_tys.len() == inputs.len(),
+                                        TypeError::WrongNumArgs {
+                                            expected: inputs.len(),
+                                            actual: arg_tys.len(),
+                                            span: Span::DUMMY,
+                                        }
+                                    );
+
+                                    for (given, expected) in arg_tys.iter().zip(inputs) {
+                                        self.unify(*given, *expected)?;
+                                    }
+
+                                    self.unify(*ret_ty, *output)?;
+                                }
+                                TypeKind::Hole(_) => remaining_goals.push(goal.clone()),
+                                _ => bail!(TypeError::TypeMismatchCustom {
+                                    expected: "function".into(),
+                                    actual: f_ty,
+                                    span: Span::DUMMY,
                                 }),
                             }
                         }
@@ -1121,9 +1183,9 @@ mod inference {
             Ok(())
         }
 
-        pub fn add_goal(&mut self, ty: Type, rvalue: GoalRValue) {
+        pub fn add_goal(&mut self, goal: Goal) {
             // println!("adding goal that {ty:?} = {rvalue:?}");
-            self.goals.push((ty, rvalue));
+            self.goals.push(goal);
         }
 
         // TODO: make this more type safe so visiting can only be called when this is validated

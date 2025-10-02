@@ -1,0 +1,9 @@
+fn main() {
+  ()
+}
+
+// can we get information about x based on it being passed into this closure...
+fn foo(x: _) {
+  x(1, 2);
+  ()
+}

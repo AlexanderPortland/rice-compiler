@@ -1,0 +1,11 @@
+fn foo(x: _) -> _ {
+  int_to_string(x)
+}
+
+fn bar(x: _) -> _ {
+  x ^ "!"
+}
+
+fn main() {
+  println(bar(foo(42)))
+}
