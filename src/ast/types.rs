@@ -82,6 +82,10 @@ impl Type {
         self.0.as_ref()
     }
 
+    pub fn is_hole(&self) -> bool {
+        matches!(self.kind(), TypeKind::Hole(_))
+    }
+
     /// Substitute holes for types by running a function `f` on each hole.
     pub fn subst(self, f: &mut impl FnMut(usize) -> Type) -> Type {
         match self.kind() {
@@ -98,7 +102,7 @@ impl Type {
                 output.subst(f),
             ),
             TypeKind::Hole(hole) => f(*hole),
-            TypeKind::Array(_) => todo!("not sure how to do this yet for arrays"),
+            TypeKind::Array(inner) => Type::array(inner.subst(f)),
         }
     }
 }

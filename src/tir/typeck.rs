@@ -10,6 +10,7 @@ use crate::{
     tir::{
         typeck::inference::InferenceCtx,
         types::{self as tir, Binop, Expr, ImplRef, MethodRef, Type, TypeKind},
+        visit::VisitMut,
     },
     utils::{Symbol, sym},
 };
@@ -180,6 +181,7 @@ pub struct Globals {
 pub struct Tcx {
     globals: Globals,
     loop_count: usize,
+    inference: InferenceCtx,
 }
 
 /// A predicate which must hold on a concrete type, excluding equality.
@@ -237,6 +239,7 @@ impl Tcx {
         let mut tcx = Tcx {
             globals: Globals::default(),
             loop_count: 0,
+            inference: InferenceCtx::new(),
         };
 
         // Load stdlib into the type context
@@ -291,7 +294,11 @@ impl Tcx {
 
         self.globals.funcs.retain(|_, tds| !tds.is_empty());
 
-        let prog = tir::Program::new(tir_prog);
+        let mut prog = tir::Program::new(tir_prog);
+
+        // Check our inference results are valid and replace all types
+        self.inference.check_validity()?;
+        self.inference.visit_program(&mut prog);
 
         Ok(prog)
     }
@@ -435,14 +442,25 @@ impl Tcx {
     }
 
     fn ty_equiv(&mut self, expected: Type, actual: Type, span: Span) -> Result<()> {
+        // println!("ty equiv (expected {expected:?} <-> actual {actual:?})");
+
         ensure!(
-            expected.equiv(actual.kind()),
+            self.inference.unify(expected, actual).is_ok(),
             TypeError::TypeMismatch {
                 expected,
                 actual,
                 span,
             }
         );
+
+        // ensure!(
+        //     expected.equiv(actual.kind()),
+        //     TypeError::TypeMismatch {
+        //         expected,
+        //         actual,
+        //         span,
+        //     }
+        // );
         Ok(())
     }
 
@@ -963,106 +981,146 @@ impl Tcx {
 }
 
 mod inference {
-    use std::collections::HashMap;
-
-    use petgraph::unionfind::UnionFind;
+    use miette::{Diagnostic, ensure};
+    use thiserror::Error;
 
     use super::Result;
 
-    use crate::bc::types::Type;
+    use crate::{bc::types::Type, tir::visit::VisitMut};
+    use std::collections::HashMap;
 
+    #[derive(Debug, Default)]
     pub struct InferenceCtx {
-        /// A union to keep track of which holes are equal
-        hole_eq: UnionFind<usize>,
+        inner: HashMap<Type, Option<Type>>,
+    }
 
-        /// A hashmap to keep track of what types those leading holes correspond to
-        hole_val: HashMap<usize, Type>,
+    #[derive(Diagnostic, Error, Debug)]
+    pub enum InferenceError {
+        #[error("type inference ambiguity for type {ty:?}")]
+        Ambiguous { ty: Type },
+        #[error("type mismatch")]
+        Mismatch,
     }
 
     use crate::bc::types::TypeKind;
 
+    impl VisitMut for InferenceCtx {
+        fn visit_type(&mut self, ty: &mut Type) {
+            // replace only the holes
+            let old = *ty;
+            *ty = self.normalize(ty);
+            // println!("{old:?} -> {:?}", ty);
+        }
+    }
+
     impl InferenceCtx {
-        fn new() -> Self {
-            InferenceCtx {
-                hole_eq: UnionFind::new_empty(),
-                hole_val: HashMap::new(),
-            }
+        pub fn new() -> Self {
+            InferenceCtx::default()
         }
 
-        fn unify(&mut self, a: Type, b: Type) -> Result<()> {
+        pub fn check_validity(&self) -> Result<()> {
+            // println!("final --- {:?}", self.inner);
+            for ty in self.inner.keys().filter(|a| a.is_hole()) {
+                if let TypeKind::Hole(hole) = ty.kind() {
+                    let resolve = self.normalize(ty);
+
+                    ensure!(
+                        !resolve.is_hole(),
+                        InferenceError::Ambiguous { ty: resolve }
+                    );
+                } else {
+                    panic!();
+                }
+            }
+
+            Ok(())
+        }
+
+        pub fn unify(&mut self, a: Type, b: Type) -> Result<()> {
             let a = self.normalize(&a);
             let b = self.normalize(&b);
 
             match (a.kind(), b.kind()) {
-                (TypeKind::Hole(hole_a), TypeKind::Hole(hole_b)) => self.union(*hole_a, *hole_b),
-                (TypeKind::Hole(hole), _known) => self.set_val(hole, &b),
-                (_known, TypeKind::Hole(hole)) => self.set_val(hole, &a),
+                (TypeKind::Hole(_hole_a), TypeKind::Hole(_hole_b)) => self.union(a, b),
+                (TypeKind::Hole(_hole), _known) => self.union(a, b),
+                (_known, TypeKind::Hole(_hole)) => self.union(b, a),
                 (TypeKind::Array(a1), TypeKind::Array(a2)) => self.unify(*a1, *a2),
                 (TypeKind::Tuple(t1), TypeKind::Tuple(t2)) => {
-                    assert!(t1.len() == t2.len());
+                    ensure!(t1.len() == t2.len(), InferenceError::Mismatch);
                     for (t1, t2) in t1.iter().zip(t2.iter()) {
                         self.unify(*t1, *t2)?;
                     }
                     Ok(())
                 }
                 (prim1, prim2) => {
-                    assert!(prim1.equiv(prim2));
+                    // println!("comparing prims {:?}, {:?}", prim1, prim2);
+                    ensure!(prim1.equiv(prim2), InferenceError::Mismatch);
+                    // assert!(prim1.equiv(prim2));
                     Ok(())
                 }
             }
         }
 
         fn normalize(&self, ty: &Type) -> Type {
+            // println!("normalizing {ty:?}");
             // replace each hole using the helper they provide...
-            let mut replace_hole = |hole| self.find_or_keep_as_hole(hole);
+            let mut replace_hole = |hole| self.replace_or_keep_as_hole(hole);
             ty.subst(&mut replace_hole)
         }
 
-        /// Unions two holes to be equal
-        fn union(&mut self, a: usize, b: usize) -> Result<()> {
-            let old_type = match (self.find(&a), self.find(&b)) {
-                (Some(t1), Some(t2)) => {
-                    assert_eq!(t1, t2, "types of unioned groups should be equal");
-                    Some(t1)
+        fn find(&self, el: Type) -> Option<Type> {
+            let rep = self.rep(el)?;
+            if rep.is_hole() { None } else { Some(rep) }
+        }
+
+        fn rep_or_insert(&mut self, el: Type) -> Type {
+            if let Some(existing) = self.rep(el) {
+                existing
+            } else {
+                assert!(self.inner.insert(el, None).is_none());
+                el
+            }
+        }
+
+        fn rep(&self, el: Type) -> Option<Type> {
+            let entry = self.inner.get(&el)?;
+            match entry {
+                Some(t) => self.rep(*t),
+                None => Some(el),
+            }
+        }
+
+        fn replace_or_keep_as_hole(&self, hole: usize) -> Type {
+            let ty = Type::hole(hole);
+            match self.find(ty) {
+                None => {
+                    assert!(ty.is_hole());
+                    ty
                 }
-                (Some(known), None) | (None, Some(known)) => Some(known),
-                _ => None,
+                Some(expanded) => expanded,
+            }
+        }
+
+        /// Unions two types to be equal. If only one is a hole, the hole should be on the left.
+        fn union(&mut self, a: Type, b: Type) -> Result<()> {
+            // println!("union {a:?} and {b:?}");
+
+            match (a.is_hole(), b.is_hole()) {
+                (false, true) => panic!("illegal use"),
+                (false, false) => panic!("illegal use 2"),
+                _ => (),
+            }
+
+            let rep_a = self.rep_or_insert(a);
+            let rep_b = self.rep_or_insert(b);
+
+            match (rep_a.is_hole(), rep_b.is_hole()) {
+                (true, true) | (true, false) => self.inner.insert(rep_a, Some(rep_b)),
+                (false, true) => self.inner.insert(rep_b, Some(rep_a)),
+                (false, false) => panic!("dont want ot handl ethis yet"),
             };
 
-            self.hole_eq.union(a, b);
-            if let Some(old_type) = old_type {
-                let new_rep = self.hole_eq.find(a);
-                self.set_val(&new_rep, &old_type);
-            }
-
             Ok(())
-        }
-
-        fn set_val(&mut self, hole: &usize, ty: &Type) -> Result<()> {
-            let rep = self.hole_eq.find(*hole);
-
-            if let Some(existing) = self.hole_val.insert(rep, *ty) {
-                assert_eq!(
-                    existing, *ty,
-                    "shouldn't be changing the existing value of a type"
-                );
-            }
-            Ok(())
-        }
-
-        fn find_or_keep_as_hole(&self, hole: usize) -> Type {
-            match self.find(&hole) {
-                Some(known_type) => known_type,
-                None => Type::hole(hole),
-            }
-        }
-
-        /// Finds the type for a given hole, if we have one
-        fn find(&self, hole: &usize) -> Option<Type> {
-            self.hole_eq
-                .try_find(*hole)
-                .map(|rep_hole| self.hole_val.get(&rep_hole).cloned())
-                .flatten()
         }
     }
 }
