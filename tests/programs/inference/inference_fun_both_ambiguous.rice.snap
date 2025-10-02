@@ -5,6 +5,6 @@ expression: output
 success = false
 stdout = ''
 stderr = '''
-Error:   × type inference ambiguity for type Type(Hole(1))
+Error:   × type inference ambiguity for type Type(Hole(0))
 
 '''

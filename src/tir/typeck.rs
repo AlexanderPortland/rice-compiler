@@ -2,7 +2,11 @@
 
 use itertools::Itertools;
 use miette::{Diagnostic, Result, bail, ensure};
-use std::collections::{HashMap, HashSet};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+    sync::atomic::AtomicUsize,
+};
 use thiserror::Error;
 
 use crate::{
@@ -182,6 +186,8 @@ pub struct Tcx {
     globals: Globals,
     loop_count: usize,
     inference: InferenceCtx,
+    constraints: Vec<(TypeConstraint, Type, Span)>,
+    hole_counter: AtomicUsize,
 }
 
 /// A predicate which must hold on a concrete type, excluding equality.
@@ -235,11 +241,13 @@ macro_rules! ensure_let {
 }
 
 impl Tcx {
-    pub fn new() -> Self {
+    pub fn new(hole_count: usize) -> Self {
         let mut tcx = Tcx {
             globals: Globals::default(),
             loop_count: 0,
             inference: InferenceCtx::new(),
+            constraints: Vec::default(),
+            hole_counter: AtomicUsize::new(hole_count),
         };
 
         // Load stdlib into the type context
@@ -248,6 +256,13 @@ impl Tcx {
         }
 
         tcx
+    }
+
+    fn new_hole(&self) -> Type {
+        let hole_num = self
+            .hole_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Type::hole(hole_num)
     }
 
     pub fn globals(&self) -> &Globals {
@@ -295,6 +310,8 @@ impl Tcx {
         self.globals.funcs.retain(|_, tds| !tds.is_empty());
 
         let mut prog = tir::Program::new(tir_prog);
+
+        self.check_constraint()?;
 
         // Check our inference results are valid and replace all types
         self.inference.check_validity()?;
@@ -442,8 +459,6 @@ impl Tcx {
     }
 
     fn ty_equiv(&mut self, actual: Type, expected: Type, span: Span) -> Result<()> {
-        // println!("ty equiv (expected {expected:?} <-> actual {actual:?})");
-
         ensure!(
             self.inference.unify(expected, actual).is_ok(),
             TypeError::TypeMismatch {
@@ -456,8 +471,17 @@ impl Tcx {
         Ok(())
     }
 
+    /// Adds a type constraint but **does not** check that it is satisfied yet
     fn ty_constraint(&mut self, constraint: TypeConstraint, ty: Type, span: Span) -> Result<()> {
-        constraint.satisfied_by(ty, span, &self.globals)
+        self.constraints.push((constraint, ty, span));
+        Ok(())
+    }
+
+    fn check_constraint(&self) -> Result<()> {
+        for (constraint, ty, span) in &self.constraints {
+            constraint.satisfied_by(self.inference.normalize(ty), *span, &self.globals)?;
+        }
+        Ok(())
     }
 
     fn enter_loop(&mut self) {
@@ -577,38 +601,50 @@ impl Tcx {
 
             ast::ExprKind::Project { e, i } => {
                 let e = self.check_expr(e)?;
-                let tys = match e.ty.kind() {
-                    TypeKind::Tuple(tys) => tys,
-                    TypeKind::Struct(name) => {
-                        ensure_let!(
-                            Some(tys) = self.globals.structs.get(name),
-                            TypeError::UnknownStruct {
-                                name: *name,
-                                span: e.span
-                            }
-                        );
-                        tys
-                    }
-                    _ => bail!(TypeError::InvalidProjectionType {
-                        ty: e.ty,
-                        span: e.span
-                    }),
-                };
 
-                ensure_let!(
-                    Some(ith_ty) = tys.get(*i),
-                    TypeError::InvalidProjectionIndex {
-                        index: *i,
-                        span: expr.span,
-                    }
-                );
+                let projected_ty = if let TypeKind::Hole(_hole) = e.ty.kind() {
+                    // if we dont know what the type we're projecting on is yet...
+                    let ret_ty = self.new_hole();
+                    self.inference
+                        .add_goal(ret_ty, inference::GoalRValue::Project(e.ty, *i));
+
+                    ret_ty
+                } else {
+                    let tys = match e.ty.kind() {
+                        TypeKind::Tuple(tys) => tys,
+                        TypeKind::Struct(name) => {
+                            ensure_let!(
+                                Some(tys) = self.globals.structs.get(name),
+                                TypeError::UnknownStruct {
+                                    name: *name,
+                                    span: e.span
+                                }
+                            );
+                            tys
+                        }
+                        TypeKind::Hole(hole) => unreachable!("should have handled below"),
+                        _ => bail!(TypeError::InvalidProjectionType {
+                            ty: e.ty,
+                            span: e.span
+                        }),
+                    };
+
+                    ensure_let!(
+                        Some(ith_ty) = tys.get(*i),
+                        TypeError::InvalidProjectionIndex {
+                            index: *i,
+                            span: expr.span,
+                        }
+                    );
+                    *ith_ty
+                };
 
                 (
                     tir::ExprKind::Project {
                         e: Box::new(e),
                         i: *i,
                     },
-                    *ith_ty,
+                    projected_ty,
                 )
             }
 
@@ -948,11 +984,18 @@ impl Tcx {
 
                 self.ty_equiv(Type::int(), i.ty, i.span)?;
 
-                let TypeKind::Array(inner_ty) = e.ty.kind() else {
-                    bail!(TypeError::NonIndexableType {
+                let inner_ty = match e.ty.kind() {
+                    TypeKind::Array(inner_ty) => *inner_ty,
+                    TypeKind::Hole(_hole) => {
+                        let ret_ty = self.new_hole();
+                        self.inference
+                            .add_goal(ret_ty, inference::GoalRValue::Index(e.ty));
+                        ret_ty
+                    }
+                    _ => bail!(TypeError::NonIndexableType {
                         ty: e.ty,
                         span: e.span
-                    });
+                    }),
                 };
 
                 (
@@ -960,7 +1003,7 @@ impl Tcx {
                         e: Box::new(e),
                         i: Box::new(i),
                     },
-                    *inner_ty,
+                    inner_ty,
                 )
             }
         };
@@ -973,17 +1016,29 @@ impl Tcx {
 }
 
 mod inference {
-    use miette::{Diagnostic, ensure};
+    use itertools::Itertools;
+    use miette::{Diagnostic, bail, ensure};
     use thiserror::Error;
 
     use super::Result;
 
-    use crate::{bc::types::Type, tir::visit::VisitMut};
+    use crate::{
+        ast::types::Span,
+        bc::types::Type,
+        tir::{typeck::TypeError, visit::VisitMut},
+    };
     use std::collections::HashMap;
 
     #[derive(Debug, Default)]
     pub struct InferenceCtx {
-        inner: HashMap<Type, Option<Type>>,
+        types: HashMap<Type, Option<Type>>,
+        goals: Vec<(Type, GoalRValue)>,
+    }
+
+    #[derive(Debug, Copy, Clone)]
+    pub enum GoalRValue {
+        Index(Type),
+        Project(Type, usize),
     }
 
     #[derive(Diagnostic, Error, Debug)]
@@ -1010,10 +1065,74 @@ mod inference {
             InferenceCtx::default()
         }
 
-        pub fn check_validity(&self) -> Result<()> {
-            // println!("final --- {:?}", self.inner);
-            for ty in self.inner.keys().filter(|a| a.is_hole()) {
-                if let TypeKind::Hole(hole) = ty.kind() {
+        fn eval_goals(&mut self) -> Result<()> {
+            while !self.goals.is_empty() {
+                let mut remaining_goals = Vec::new();
+                // println!("starting w/ goals {:?}", self.goals);
+
+                // apply all the rules we know
+                for (ty, rvalue) in &self.goals.clone() {
+                    match rvalue {
+                        GoalRValue::Index(arr_ty) => {
+                            let arr_ty = self.normalize(arr_ty);
+                            match arr_ty.kind() {
+                                TypeKind::Hole(_) => remaining_goals.push((*ty, *rvalue)),
+                                TypeKind::Array(inner) => {
+                                    self.unify(*ty, *inner)?;
+                                }
+                                _ => bail!(TypeError::NonIndexableType {
+                                    ty: arr_ty,
+                                    span: Span::DUMMY,
+                                }),
+                            }
+                        }
+                        GoalRValue::Project(tup_ty, index) => {
+                            let tup_ty = self.normalize(tup_ty);
+                            match tup_ty.kind() {
+                                TypeKind::Hole(_) => remaining_goals.push((*ty, *rvalue)),
+                                TypeKind::Tuple(inner_ty) => {
+                                    let index = *index;
+                                    ensure!(
+                                        index <= inner_ty.len(),
+                                        TypeError::InvalidProjectionIndex {
+                                            index,
+                                            span: Span::DUMMY
+                                        }
+                                    );
+                                    self.unify(*ty, inner_ty[index])?;
+                                }
+                                _ => bail!(TypeError::InvalidProjectionType {
+                                    ty: tup_ty,
+                                    span: Span::DUMMY
+                                }),
+                            }
+                        }
+                    }
+                }
+
+                // println!("remaining goals {:?}", remaining_goals);
+                // if we didn't learn anything, AMBIGUITY
+                ensure!(
+                    remaining_goals.len() < self.goals.len(),
+                    InferenceError::Ambiguous { ty: Type::int() }
+                );
+                self.goals = remaining_goals;
+            }
+            Ok(())
+        }
+
+        pub fn add_goal(&mut self, ty: Type, rvalue: GoalRValue) {
+            // println!("adding goal that {ty:?} = {rvalue:?}");
+            self.goals.push((ty, rvalue));
+        }
+
+        // TODO: make this more type safe so visiting can only be called when this is validated
+        pub fn check_validity(&mut self) -> Result<()> {
+            self.eval_goals()?;
+
+            // check for remaining holes
+            for ty in self.types.keys().sorted().filter(|a| a.is_hole()) {
+                if let TypeKind::Hole(_hole) = ty.kind() {
                     let resolve = self.normalize(ty);
 
                     ensure!(
@@ -1069,13 +1188,13 @@ mod inference {
             if let Some(existing) = self.rep(el) {
                 existing
             } else {
-                assert!(self.inner.insert(el, None).is_none());
+                assert!(self.types.insert(el, None).is_none());
                 el
             }
         }
 
         fn rep(&self, el: Type) -> Option<Type> {
-            let entry = self.inner.get(&el)?;
+            let entry = self.types.get(&el)?;
             match entry {
                 Some(t) => self.rep(*t),
                 None => Some(el),
@@ -1107,8 +1226,8 @@ mod inference {
             let rep_b = self.rep_or_insert(b);
 
             match (rep_a.is_hole(), rep_b.is_hole()) {
-                (true, true) | (true, false) => self.inner.insert(rep_a, Some(rep_b)),
-                (false, true) => self.inner.insert(rep_b, Some(rep_a)),
+                (true, true) | (true, false) => self.types.insert(rep_a, Some(rep_b)),
+                (false, true) => self.types.insert(rep_b, Some(rep_a)),
                 (false, false) => panic!("dont want ot handl ethis yet"),
             };
 
