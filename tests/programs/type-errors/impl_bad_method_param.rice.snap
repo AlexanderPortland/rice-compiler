@@ -10,7 +10,7 @@ Error:   × type mismatch
  7 │ impl Bar for Foo {
  8 │   fn bloop(self: Self, s: string) -> int { 0 }
    ·      ──┬──
-   ·        ╰── expected `int`, found `string`
+   ·        ╰── expected `string`, found `int`
  9 │ }
    ╰────
 

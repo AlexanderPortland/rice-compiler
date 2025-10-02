@@ -441,26 +441,18 @@ impl Tcx {
         })
     }
 
-    fn ty_equiv(&mut self, expected: Type, actual: Type, span: Span) -> Result<()> {
+    fn ty_equiv(&mut self, actual: Type, expected: Type, span: Span) -> Result<()> {
         // println!("ty equiv (expected {expected:?} <-> actual {actual:?})");
 
         ensure!(
             self.inference.unify(expected, actual).is_ok(),
             TypeError::TypeMismatch {
-                expected,
-                actual,
+                expected: self.inference.normalize(&expected),
+                actual: self.inference.normalize(&actual),
                 span,
             }
         );
 
-        // ensure!(
-        //     expected.equiv(actual.kind()),
-        //     TypeError::TypeMismatch {
-        //         expected,
-        //         actual,
-        //         span,
-        //     }
-        // );
         Ok(())
     }
 
@@ -523,13 +515,13 @@ impl Tcx {
                 let right = self.check_expr(right)?;
                 let out_ty = match op {
                     Binop::Shl | Binop::Shr | Binop::BitAnd | Binop::BitOr => {
-                        self.ty_equiv(Type::int(), left.ty, left.span)?;
-                        self.ty_equiv(Type::int(), right.ty, right.span)?;
+                        self.ty_equiv(left.ty, Type::int(), left.span)?;
+                        self.ty_equiv(right.ty, Type::int(), right.span)?;
                         Type::int()
                     }
                     Binop::Add | Binop::Sub | Binop::Mul | Binop::Div | Binop::Rem | Binop::Exp => {
                         self.ty_constraint(TypeConstraint::Numeric, left.ty, left.span)?;
-                        self.ty_equiv(left.ty, right.ty, right.span)?;
+                        self.ty_equiv(right.ty, left.ty, right.span)?;
                         left.ty
                     }
                     Binop::Ge | Binop::Gt | Binop::Le | Binop::Lt => {
@@ -538,8 +530,8 @@ impl Tcx {
                         Type::bool()
                     }
                     Binop::Or | Binop::And => {
-                        self.ty_equiv(Type::bool(), left.ty, left.span)?;
-                        self.ty_equiv(Type::bool(), right.ty, right.span)?;
+                        self.ty_equiv(left.ty, Type::bool(), left.span)?;
+                        self.ty_equiv(right.ty, Type::bool(), right.span)?;
                         Type::bool()
                     }
                     Binop::Eq | Binop::Neq => {
@@ -547,8 +539,8 @@ impl Tcx {
                         Type::bool()
                     }
                     Binop::Concat => {
-                        self.ty_equiv(Type::string(), left.ty, left.span)?;
-                        self.ty_equiv(Type::string(), right.ty, left.span)?;
+                        self.ty_equiv(left.ty, Type::string(), left.span)?;
+                        self.ty_equiv(right.ty, Type::string(), left.span)?;
                         Type::string()
                     }
                 };
@@ -944,7 +936,7 @@ impl Tcx {
 
                 // And then ensure that all other types are equivalent to the first.
                 for expr in exprs.iter().skip(1) {
-                    self.ty_equiv(first_ty, expr.ty, expr.span)?;
+                    self.ty_equiv(expr.ty, first_ty, expr.span)?;
                 }
 
                 (tir::ExprKind::Array(exprs), tir::Type::array(first_ty))
@@ -1061,7 +1053,7 @@ mod inference {
             }
         }
 
-        fn normalize(&self, ty: &Type) -> Type {
+        pub fn normalize(&self, ty: &Type) -> Type {
             // println!("normalizing {ty:?}");
             // replace each hole using the helper they provide...
             let mut replace_hole = |hole| self.replace_or_keep_as_hole(hole);
