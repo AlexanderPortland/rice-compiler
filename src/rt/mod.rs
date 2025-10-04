@@ -450,7 +450,7 @@ impl Runtime {
 
         log::debug!("array val is {val:?} w/ count {count:?}");
 
-        ArrayRef::new(store, allocator, &val, len).map(|array_ref| Val::from(array_ref))
+        ArrayRef::new(store, allocator, &val, len).map(Val::from)
     }
 
     fn alloc_array_vals(

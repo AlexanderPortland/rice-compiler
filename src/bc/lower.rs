@@ -421,8 +421,8 @@ impl<'a> LowerBody<'a> {
 
             tir::ExprKind::ArrayCopy { val, count } => {
                 log::debug!("array copy w/ val {val:?}");
-                let val = self.lower_expr_into_tmp(&val);
-                let count = self.lower_expr_into_tmp(&count);
+                let val = self.lower_expr_into_tmp(val);
+                let count = self.lower_expr_into_tmp(count);
 
                 add_assign!(bc::Rvalue::Alloc {
                     kind: AllocKind::Array,
@@ -462,7 +462,7 @@ impl<'a> LowerBody<'a> {
                 log::debug!("new place is {place}");
                 self.lower_expr_into(e, WriteDst::Place(place));
 
-                let tmp = self.lower_expr_into_tmp(&i);
+                let tmp = self.lower_expr_into_tmp(i);
                 log::debug!("tmp is {place}");
                 let projected = place.extend_projection(
                     [ProjectionElem::Index {
