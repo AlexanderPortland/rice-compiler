@@ -4,6 +4,7 @@
 
 #![allow(unused)]
 
+pub mod r#const;
 pub mod dead;
 
 use either::Either;

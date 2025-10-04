@@ -5,6 +5,8 @@ use std::fmt::Debug;
 use miette::Result;
 use strum::{Display, EnumString};
 
+use crate::bc::dataflow::r#const::const_prop;
+
 use self::types::{Function, Program};
 use dataflow::dead::eliminate_dead_code;
 
@@ -50,6 +52,7 @@ type Pass = Box<dyn Fn(&mut Function) -> bool>;
 fn optimize_func(func: &mut Function) {
     let passes: Vec<Pass> = vec![
         // TODO: insert passes here
+        Box::new(const_prop),
         Box::new(eliminate_dead_code),
     ];
 

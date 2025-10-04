@@ -5,7 +5,6 @@ use crate::bc::{
 };
 use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
 use itertools::Itertools;
-use wasmtime::StoreContextMut;
 
 pub fn eliminate_dead_code(func: &mut Function) -> bool {
     let analysis_result = analyze_to_fixpoint(&DeadCodeAnalyis, func);
