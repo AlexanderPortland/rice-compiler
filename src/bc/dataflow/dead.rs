@@ -12,16 +12,16 @@ pub fn eliminate_dead_code(func: &mut Function) -> bool {
     // println!("func body {:?}", func.body);
     let analysis_result = analyze_to_fixpoint(&DeadCodeAnalyis, func);
 
-    for loc in func.body.locations().iter() {
-        println!(
-            "location {loc:?} has domain {:?}",
-            analysis_result
-                .get(loc)
-                .iter()
-                .map(|loc| { format!("{:?}", func.locals.index(loc)) })
-                .join(",")
-        )
-    }
+    // for loc in func.body.locations().iter() {
+    //     println!(
+    //         "location {loc:?} has domain {:?}",
+    //         analysis_result
+    //             .get(loc)
+    //             .iter()
+    //             .map(|loc| { format!("{:?}", func.locals.index(loc)) })
+    //             .join(",")
+    //     )
+    // }
 
     let mut eliminator = DeadCodeElimination::new(&analysis_result);
     eliminator.visit_function(func);
@@ -74,7 +74,9 @@ impl crate::bc::visit::Visit for UpdateLiveSet<'_> {
     }
 
     fn visit_lvalue(&mut self, place: &crate::bc::types::Place, _loc: Location) {
-        self.0.remove(place.local);
+        if place.projection.is_empty() {
+            self.0.remove(place.local);
+        }
     }
 }
 
@@ -112,10 +114,10 @@ impl VisitMut for DeadCodeElimination<'_> {
                     .contains(stmt.place.local);
                 instr += 1;
                 let has_sideffect = DeadCodeElimination::has_side_effects(stmt);
-                println!(
-                    "stmt {stmt} @ {instr} has is_dead {is_used}, has_sideffect {}",
-                    has_sideffect
-                );
+                // println!(
+                //     "stmt {stmt} @ {instr} has is_dead {is_used}, has_sideffect {}",
+                //     has_sideffect
+                // );
                 if !is_used && !has_sideffect {
                     // REMOVE
                     self.any_change |= true;
