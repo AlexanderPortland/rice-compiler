@@ -1,27 +1,14 @@
-use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
-use itertools::Itertools;
-use wasmtime::StoreContextMut;
-
 use crate::bc::{
     dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
     types::{Function, Local, Location, Operand, Rvalue, Statement},
     visit::{Visit, VisitMut},
 };
+use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
+use itertools::Itertools;
+use wasmtime::StoreContextMut;
 
 pub fn eliminate_dead_code(func: &mut Function) -> bool {
-    // println!("func body {:?}", func.body);
     let analysis_result = analyze_to_fixpoint(&DeadCodeAnalyis, func);
-
-    // for loc in func.body.locations().iter() {
-    //     println!(
-    //         "location {loc:?} has domain {:?}",
-    //         analysis_result
-    //             .get(loc)
-    //             .iter()
-    //             .map(|loc| { format!("{:?}", func.locals.index(loc)) })
-    //             .join(",")
-    //     )
-    // }
 
     let mut eliminator = DeadCodeElimination::new(&analysis_result);
     eliminator.visit_function(func);
@@ -92,13 +79,6 @@ impl<'z> DeadCodeElimination<'z> {
             dead_locals,
         }
     }
-
-    fn has_side_effects(stmt: &Statement) -> bool {
-        matches!(
-            stmt.rvalue,
-            Rvalue::Closure { .. } | Rvalue::MethodCall { .. }
-        )
-    }
 }
 
 impl VisitMut for DeadCodeElimination<'_> {
@@ -112,13 +92,12 @@ impl VisitMut for DeadCodeElimination<'_> {
                     .dead_locals
                     .get(Location { block, instr })
                     .contains(stmt.place.local);
+                let has_effect =
+                    matches!(stmt.rvalue, Rvalue::Call { .. } | Rvalue::MethodCall { .. });
+
                 instr += 1;
-                let has_sideffect = DeadCodeElimination::has_side_effects(stmt);
-                // println!(
-                //     "stmt {stmt} @ {instr} has is_dead {is_used}, has_sideffect {}",
-                //     has_sideffect
-                // );
-                if !is_used && !has_sideffect {
+
+                if !is_used && !has_effect {
                     // REMOVE
                     self.any_change |= true;
                     change_here |= true;

@@ -1,0 +1,5 @@
+// -O1
+fn main() {
+  let x = println("hello") in
+  println("unrelated")
+}

@@ -70,13 +70,13 @@ pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> Analys
         // Our current in, which must be joined with new info (if any)
         let mut new_in = state.get(loc).clone();
 
+        let mut changed = false;
         for flow_from_loc in flow_from {
-            new_in.join(&apply_transfer(analysis, &state, func, flow_from_loc));
+            changed |= new_in.join(&apply_transfer(analysis, &state, func, flow_from_loc));
         }
 
-        let old_in = state.get_mut(loc);
-        if new_in != *old_in {
-            *old_in = new_in;
+        if changed {
+            *state.get_mut(loc) = new_in;
             to_visit.extend(flow_to);
         }
     }
