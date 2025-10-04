@@ -1095,7 +1095,6 @@ mod inference {
         fn eval_goals(&mut self) -> Result<()> {
             while !self.goals.is_empty() {
                 let mut remaining_goals = Vec::new();
-                // println!("starting w/ goals {:?}", self.goals);
 
                 // apply all the rules we know
                 for goal in &self.goals.clone() {

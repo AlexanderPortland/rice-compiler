@@ -1,9 +1,12 @@
 //! Bytecode (BC) code representation.
 
+use std::fmt::Debug;
+
 use miette::Result;
 use strum::{Display, EnumString};
 
 use self::types::{Function, Program};
+use dataflow::dead::eliminate_dead_code;
 
 mod dataflow;
 mod lower;
@@ -47,6 +50,7 @@ type Pass = Box<dyn Fn(&mut Function) -> bool>;
 fn optimize_func(func: &mut Function) {
     let passes: Vec<Pass> = vec![
         // TODO: insert passes here
+        Box::new(eliminate_dead_code),
     ];
 
     loop {

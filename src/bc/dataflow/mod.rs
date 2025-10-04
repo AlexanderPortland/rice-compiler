@@ -4,6 +4,8 @@
 
 #![allow(unused)]
 
+pub mod dead;
+
 use either::Either;
 use indexical::{
     IndexedValue, bitset::bitvec::ArcIndexSet as IndexSet, vec::ArcIndexVec as IndexVec,
@@ -55,18 +57,14 @@ pub type AnalysisState<A> = IndexVec<Location, <A as Analysis>::Domain>;
 /// Executes the dataflow analysis on the given function to a fixpoint, returning
 /// the analysis state at each location.
 pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> AnalysisState<A> {
-    if A::DIRECTION != Direction::Forward {
-        panic!();
-    }
-
     // Create the initial state for our analysis -- every location has the bottom abstract domain.
     // REMEMBER, this represents the state BEFORE the given instruction is executed.
     let mut state = IndexVec::from_elem(analysis.bottom(func), func.body.locations());
 
     // Create the list of instructions we must visit
-    let mut to_visit = Vec::from_iter(func.body.locations().iter().copied());
+    let mut to_visit = VecDeque::from_iter(func.body.locations().iter().copied());
 
-    while let Some(loc) = to_visit.pop() {
+    while let Some(loc) = to_visit.pop_front() {
         let (flow_from, flow_to) = flow::<A>(func, loc);
 
         // Our current in, which must be joined with new info (if any)
