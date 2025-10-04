@@ -5,9 +5,8 @@ use std::fmt::Debug;
 use miette::Result;
 use strum::{Display, EnumString};
 
-use crate::bc::dataflow::r#const::const_prop;
-
 use self::types::{Function, Program};
+use dataflow::r#const::const_prop;
 use dataflow::dead::eliminate_dead_code;
 
 mod dataflow;

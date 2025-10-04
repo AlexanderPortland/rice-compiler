@@ -6,6 +6,7 @@
 
 pub mod r#const;
 pub mod dead;
+pub mod ptr;
 
 use either::Either;
 use indexical::{

@@ -8,6 +8,7 @@ use crate::{
     rt,
     utils::Symbol,
 };
+use core::ops::*;
 use indexical::{
     ArcIndexSet, ArcIndexVec, RcIndexSet, ToIndex, pointer::PointerFamily, vec::IndexVec,
 };
@@ -144,7 +145,7 @@ impl ConstAnalysis {
         match rvalue {
             Rvalue::Operand(op) => Self::const_eval_operand(state, op),
             Rvalue::Binop { op, left, right } => Self::const_eval_binop(state, op, left, right),
-            Rvalue::Cast { op, ty } => todo!(),
+            Rvalue::Cast { op, ty } => Self::const_eval_cast(state, op, ty),
             Rvalue::Closure { f, env } => {
                 if env.is_empty() {
                     Some(ConstInfo::Closure(*f))
@@ -173,6 +174,17 @@ impl ConstAnalysis {
         )))
     }
 
+    fn const_eval_cast(
+        state: &<Self as Analysis>::Domain,
+        op: &Operand,
+        cast_to: &Type,
+    ) -> Option<ConstInfo> {
+        // println!("casing op {:?} to {:?}", op, cast_to);
+        // todo!()
+        // TODO: can this be const eval-ed?
+        None
+    }
+
     fn const_eval_binop(
         state: &<Self as Analysis>::Domain,
         op: &Binop,
@@ -187,10 +199,78 @@ impl ConstAnalysis {
             return None;
         };
 
-        match op {
-            Binop::Add => Self::do_int_op_on_consts(left, right, i32::wrapping_add),
-            _ => None,
+        if right.ty() != left.ty() {
+            panic!("weird typing shit");
         }
+
+        let new_const = match (left, right) {
+            (Const::Bool(left), Const::Bool(right)) => Const::Bool(match op {
+                Binop::And => left && right,
+                Binop::Or => left || right,
+                Binop::Eq => left == right,
+                Binop::Neq => left != right,
+                _ => return None,
+            }),
+            (Const::Int(left), Const::Int(right)) => {
+                let op = match op {
+                    Binop::Add => i32::wrapping_add,
+                    Binop::Sub => i32::wrapping_sub,
+                    Binop::Mul => i32::wrapping_mul,
+                    Binop::Div => i32::wrapping_div,
+                    Binop::Rem => i32::wrapping_rem,
+                    Binop::Exp => |left, right| i32::pow(left, right as u32),
+                    Binop::Shl => |left, right| i32::wrapping_shl(left, right as u32),
+                    Binop::Shr => |left, right| i32::wrapping_shr(left, right as u32),
+                    Binop::BitOr => |left, right| left | right,
+                    Binop::BitAnd => |left, right| left & right,
+
+                    _ => {
+                        let ret_bool_op = match op {
+                            Binop::Ge => |left, right| i32::ge(&left, &right),
+                            Binop::Gt => |left, right| i32::gt(&left, &right),
+                            Binop::Le => |left, right| i32::le(&left, &right),
+                            Binop::Lt => |left, right| i32::lt(&left, &right),
+                            Binop::Eq => |left, right| i32::eq(&left, &right),
+                            Binop::Neq => |left, right| i32::ne(&left, &right),
+                            _ => return None,
+                        };
+                        return Some(ConstInfo::Const(Const::Bool(ret_bool_op(left, right))));
+                    }
+                };
+                Const::Int(op(left, right))
+            }
+            (Const::Float(left), Const::Float(right)) => {
+                let op = match op {
+                    Binop::Add => f32::add,
+                    Binop::Sub => f32::sub,
+                    Binop::Mul => f32::mul,
+                    Binop::Div => f32::div,
+                    Binop::Rem => |left, right| left % right,
+                    Binop::Exp => f32::powf,
+
+                    _ => {
+                        let ret_bool_op = match op {
+                            Binop::Ge => |left, right| f32::ge(&left, &right),
+                            Binop::Gt => |left, right| f32::gt(&left, &right),
+                            Binop::Le => |left, right| f32::le(&left, &right),
+                            Binop::Lt => |left, right| f32::lt(&left, &right),
+                            Binop::Eq => |left, right| f32::eq(&left, &right),
+                            Binop::Neq => |left, right| f32::ne(&left, &right),
+                            _ => return None,
+                        };
+                        return Some(ConstInfo::Const(Const::Bool(ret_bool_op(*left, *right))));
+                    }
+                };
+                Const::Float(op(*left, *right).into())
+            }
+            (Const::String(left), Const::String(right)) => match op {
+                Binop::Concat => Const::String(left + &right),
+                _ => return None,
+            },
+            _ => return None,
+        };
+
+        Some(ConstInfo::Const(new_const))
     }
 
     fn const_eval_operand(state: &<Self as Analysis>::Domain, op: &Operand) -> Option<ConstInfo> {
@@ -233,5 +313,6 @@ impl Analysis for ConstAnalysis {
         terminator: &crate::bc::types::Terminator,
         loc: Location,
     ) {
+        // do nothing
     }
 }
