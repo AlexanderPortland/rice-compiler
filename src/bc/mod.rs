@@ -56,6 +56,7 @@ fn optimize_func(func: &mut Function) {
         Box::new(const_prop),
         Box::new(eliminate_dead_code),
         Box::new(dead_control::remove_unused_blocks),
+        Box::new(dead_control::skip_empty_blocks),
     ];
 
     loop {

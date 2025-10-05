@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::bc::{
     dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
-    types::{BasicBlockIdx, Function, Local, Location, Operand, Rvalue, Statement},
+    types::{BasicBlockIdx, Function, Local, Location, Operand, Rvalue, Statement, TerminatorKind},
     visit::{Visit, VisitMut},
 };
 use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
@@ -38,15 +38,73 @@ pub fn remove_unused_blocks(func: &mut Function) -> bool {
     global_changed
 }
 
-pub fn remove_empty_block(func: &mut Function) -> bool {
+pub fn skip_empty_blocks(func: &mut Function) -> bool {
+    let mut just_goes_to: HashMap<BasicBlockIdx, BasicBlockIdx> = HashMap::new();
+    let body = &mut func.body;
+
+    for block_idx in body.blocks() {
+        let block = body.data(block_idx);
+        if block.statements.is_empty()
+            && let TerminatorKind::Jump(to_idx) = block.terminator.kind()
+        {
+            just_goes_to.insert(block_idx, *to_idx);
+        }
+    }
+
+    let mut changed = false;
+
+    for block_idx in body.blocks().collect::<Vec<_>>() {
+        let block = body.data_mut(block_idx);
+        let mut new_point_to = Vec::new();
+        let mut removed_to = Vec::new();
+
+        match &mut block.terminator.kind {
+            TerminatorKind::CondJump {
+                cond,
+                true_,
+                false_,
+            } => {
+                if let Some(true_instead) = just_goes_to.get(true_) {
+                    new_point_to.push(*true_instead);
+                    removed_to.push(*true_);
+                    *true_ = *true_instead;
+                }
+                if let Some(false_instead) = just_goes_to.get(false_) {
+                    new_point_to.push(*false_instead);
+                    removed_to.push(*false_);
+                    *false_ = *false_instead;
+                }
+            }
+            TerminatorKind::Jump(to) => {
+                if let Some(instead) = just_goes_to.get(to) {
+                    // we no longer go to `to`
+                    new_point_to.push(*instead);
+                    removed_to.push(*to);
+                    *to = *instead;
+                }
+            }
+            _ => (),
+        };
+
+        for removed_edge in removed_to {
+            changed |= true;
+
+            let e = body
+                .cfg()
+                .find_edge(block_idx.into(), removed_edge.into())
+                .expect("should have an edge");
+
+            body.cfg_mut()
+                .remove_edge(e)
+                .expect("should be able to remove it");
+        }
+
+        for new_edge in new_point_to {
+            changed |= true;
+            body.cfg_mut()
+                .add_edge(block_idx.into(), new_edge.into(), ());
+        }
+    }
+
     false
-}
-
-#[derive(Debug, Default)]
-struct DeadBlockFinder {
-    just_goes_to: HashMap<BasicBlockIdx, BasicBlockIdx>,
-}
-
-impl Visit for DeadBlockFinder {
-    fn visit_terminator(&mut self, term: &crate::bc::types::Terminator, loc: Location) {}
 }
