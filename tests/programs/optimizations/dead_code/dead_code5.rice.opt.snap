@@ -3,7 +3,5 @@ source: tests/snapshots.rs
 expression: output
 ---
 success = true
-stdout = '''
-52
-'''
+stdout = ''
 stderr = ''

@@ -15,6 +15,7 @@ use indexical::{
 use itertools::Itertools;
 
 pub fn const_prop(func: &mut Function) -> bool {
+    // println!("doing const prop");
     let analysis_result = analyze_to_fixpoint(&ConstAnalysis, func);
 
     for location in func.body.locations().indices() {
@@ -117,24 +118,26 @@ impl JoinSemiLattice for ArcIndexVec<Local, ConstInfo> {
     fn join(&mut self, other: &Self) -> bool {
         let mut changed = false;
         for (my_info, new_info) in self.iter_mut().zip(other.iter()) {
-            // println!("i have {:?}, they have {:?}", my_info, new_info);
             if my_info == new_info {
                 // println!("we match!");
                 continue;
             }
 
+            // println!("i have {:?}, they have {:?}", my_info, new_info);
+
             match (*my_info).partial_cmp(new_info) {
                 Some(std::cmp::Ordering::Less) => {
+                    // println!("i learned...");
                     changed |= true;
                     *my_info = new_info.clone()
                 }
                 None => {
+                    // println!("we both learned...");
                     changed |= true;
                     *my_info = ConstInfo::Variable
                 }
                 _ => (),
             }
-            // println!("now we have {:?}", my_info);
         }
         changed
     }
@@ -142,6 +145,7 @@ impl JoinSemiLattice for ArcIndexVec<Local, ConstInfo> {
 
 impl ConstAnalysis {
     fn const_eval_rvalue(state: &<Self as Analysis>::Domain, rvalue: &Rvalue) -> Option<ConstInfo> {
+        // println!("eval rvalue {:?}", rvalue);
         match rvalue {
             Rvalue::Operand(op) => Self::const_eval_operand(state, op),
             Rvalue::Binop { op, left, right } => Self::const_eval_binop(state, op, left, right),
@@ -191,12 +195,19 @@ impl ConstAnalysis {
         left: &Operand,
         right: &Operand,
     ) -> Option<ConstInfo> {
-        let Some(ConstInfo::Const(left)) = Self::const_eval_operand(state, left) else {
-            return None;
-        };
-
-        let Some(ConstInfo::Const(right)) = Self::const_eval_operand(state, right) else {
-            return None;
+        // println!("const eval binop {:?} on {:?} {:?}", op, left, right);
+        let (left, right) = match (
+            Self::const_eval_operand(state, left),
+            Self::const_eval_operand(state, right),
+        ) {
+            (Some(ConstInfo::Unknown), Some(ConstInfo::Unknown)) => {
+                return Some(ConstInfo::Unknown);
+            }
+            (Some(ConstInfo::Variable), Some(_)) | (Some(_), Some(ConstInfo::Variable)) => {
+                return Some(ConstInfo::Variable);
+            }
+            (Some(ConstInfo::Const(left)), Some(ConstInfo::Const(right))) => (left, right),
+            _ => return None,
         };
 
         if right.ty() != left.ty() {
@@ -298,12 +309,14 @@ impl Analysis for ConstAnalysis {
 
     fn handle_statement(&self, state: &mut Self::Domain, statement: &Statement, loc: Location) {
         let assigned_local = statement.place.local;
-        if let Some(const_val) = Self::const_eval_rvalue(state, &statement.rvalue)
-            && statement.place.projection.is_empty()
-        {
-            state[assigned_local] = const_val;
-        } else {
-            // Don't do anything. It's either not const eval or it's going into a projected place
+        if statement.place.projection.is_empty() {
+            // Ignore projected places
+            if let Some(const_val) = Self::const_eval_rvalue(state, &statement.rvalue) {
+                state[assigned_local] = const_val;
+            } else {
+                // If we can't compute it const, it's variable
+                // state[assigned_local] = ConstInfo::Variable;
+            }
         }
     }
 

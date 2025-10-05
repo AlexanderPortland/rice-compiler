@@ -4,6 +4,6 @@ expression: output
 ---
 success = true
 stdout = '''
-52
+2025
 '''
 stderr = ''

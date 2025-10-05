@@ -75,11 +75,19 @@ pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> Analys
         let mut changed = false;
         for flow_from_loc in flow_from {
             changed |= new_in.join(&apply_transfer(analysis, &state, func, flow_from_loc));
+            // println!(
+            //     "from block {:?}, i have new, in {:?}",
+            //     flow_from_loc.block, loc.block
+            // );
         }
 
         if changed {
             *state.get_mut(loc) = new_in;
-            to_visit.extend(flow_to);
+            for to in flow_to {
+                // println!("go tell {:?}", to);
+                to_visit.push_back(to);
+            }
+            // to_visit.extend(flow_to);
         }
     }
 

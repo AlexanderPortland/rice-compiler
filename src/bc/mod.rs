@@ -56,6 +56,7 @@ fn optimize_func(func: &mut Function) {
     ];
 
     loop {
+        // println!("doing opt pass");
         let mut changed = false;
         for pass in &passes {
             changed |= pass(func);

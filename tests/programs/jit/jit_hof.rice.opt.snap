@@ -4,6 +4,9 @@ expression: output
 ---
 success = true
 stdout = '''
-52
+89
+89
+89
+89
 '''
 stderr = ''

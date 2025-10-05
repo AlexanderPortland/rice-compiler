@@ -4,6 +4,7 @@ expression: output
 ---
 success = true
 stdout = '''
-52
+0
+5
 '''
 stderr = ''

@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × type mismatch
+   ╭─[inference_fun_both_contradiction.rice:7:15]
+ 6 │   println(int_to_string(foo(42)));
+ 7 │   println(foo("hello"))
+   ·               ───┬───
+   ·                  ╰── expected `int`, found `string`
+ 8 │ }
+   ╰────
+
+'''
