@@ -1,0 +1,8 @@
+fn main() {
+  let x = 10 in
+  let y = x + 12 in
+  if x != 22 {
+    y := 0
+  };
+  println(int_to_string(y))
+}

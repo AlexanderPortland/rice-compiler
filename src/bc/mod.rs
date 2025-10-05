@@ -5,9 +5,11 @@ use std::fmt::Debug;
 use miette::Result;
 use strum::{Display, EnumString};
 
+use crate::bc::dataflow::dead_control;
+
 use self::types::{Function, Program};
 use dataflow::r#const::const_prop;
-use dataflow::dead::eliminate_dead_code;
+use dataflow::dead_code::eliminate_dead_code;
 
 mod dataflow;
 mod lower;
@@ -53,6 +55,7 @@ fn optimize_func(func: &mut Function) {
         // TODO: insert passes here
         Box::new(const_prop),
         Box::new(eliminate_dead_code),
+        Box::new(dead_control::remove_unused_blocks),
     ];
 
     loop {

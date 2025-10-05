@@ -2,3 +2,4 @@
 test.rice
 .DS_Store
 **/*.snap.new
+*.json

@@ -134,11 +134,61 @@ impl Body {
             rpo.iter()
                 .copied()
                 .flat_map(|block| {
+                    // println!("building domain for block {:?}", block);
                     let num_instrs = cfg.node_weight(block.into()).unwrap().statements.len() + 1;
                     (0..num_instrs).map(move |instr| Location { block, instr })
                 })
                 .collect(),
         )
+    }
+
+    fn block_is_redundant(&self, block_no: BasicBlockIdx, min_connections: usize) -> bool {
+        self.cfg()
+            .neighbors_directed(block_no.into(), petgraph::Direction::Incoming)
+            .count()
+            <= min_connections
+            && block_no != 0
+    }
+
+    /// Shadow remove a basic block from this body's structure. Removes all nodes that it points to
+    /// but doesn't actually remove the block itself to preserve indexing. But nothing will point to it so doesn't really matter.
+    pub fn remove_block_cfg_edges(&mut self, block_no: BasicBlockIdx) {
+        // println!("remove {:?}", block_no);
+        assert_eq!(
+            self.cfg()
+                .neighbors_directed(block_no.into(), petgraph::Direction::Incoming)
+                .count(),
+            0
+        );
+        assert_ne!(block_no, 0, "dont try to remove the first block you dofus");
+        // println!("removing block {:?}", block_no);
+
+        // remove all neighbors in the cfg
+        for out_neighbor in self
+            .cfg()
+            .neighbors_directed(block_no.into(), petgraph::Direction::Outgoing)
+            .collect::<Vec<_>>()
+        {
+            // if this neighbor only has one incoming connection (us), we want to remove them too...
+
+            let edge = self
+                .cfg()
+                .find_edge(block_no.into(), out_neighbor)
+                .expect("should have an edge to all neighbors");
+            self.cfg_mut()
+                .remove_edge(edge)
+                .expect("should have an edge here..");
+
+            if self.block_is_redundant(out_neighbor.into(), 0) {
+                self.remove_block_cfg_edges(out_neighbor.into());
+            }
+        }
+    }
+
+    /// Regenerates the rpo, domain and locations. For use when adding or remove basic blocks.
+    pub fn regenerate_everything(&mut self) {
+        // I think just reconstructing it should work...
+        *self = Self::new(std::mem::take(&mut self.cfg));
     }
 
     /// Regenerates the location domain, to be used after adding or removing instructions.
@@ -166,6 +216,11 @@ impl Body {
     /// Returns the underlying CFG.
     pub fn cfg(&self) -> &Cfg {
         &self.cfg
+    }
+
+    /// Returns the underlying CFG.
+    pub fn cfg_mut(&mut self) -> &mut Cfg {
+        &mut self.cfg
     }
 
     /// Returns the location domain.

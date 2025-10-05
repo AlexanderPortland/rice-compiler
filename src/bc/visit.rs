@@ -156,6 +156,7 @@ pub trait VisitMut {
 
     fn super_visit_body(&mut self, body: &mut Body) {
         let blocks = body.blocks().collect_vec();
+
         for block in blocks {
             self.visit_basic_block(body.data_mut(block), block);
         }

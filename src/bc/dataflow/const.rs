@@ -2,7 +2,10 @@ use crate::{
     ast::types as ast,
     bc::{
         dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
-        types::{Binop, Const, Function, Local, Location, Operand, Rvalue, Statement, Type},
+        types::{
+            Binop, Const, Function, Local, Location, Operand, Rvalue, Statement, TerminatorKind,
+            Type,
+        },
         visit::{Visit, VisitMut},
     },
     rt,
@@ -15,7 +18,7 @@ use indexical::{
 use itertools::Itertools;
 
 pub fn const_prop(func: &mut Function) -> bool {
-    // println!("doing const prop");
+    // println!("CONST PROP");
     let analysis_result = analyze_to_fixpoint(&ConstAnalysis, func);
 
     for location in func.body.locations().indices() {
@@ -44,6 +47,8 @@ impl<'z> ConstProp<'z> {
     }
 }
 
+// fn always_jumps() -> Option<()
+
 impl VisitMut for ConstProp<'_> {
     fn visit_operand(&mut self, operand: &mut Operand, loc: Location) {
         if let Operand::Place(p) = operand
@@ -54,6 +59,55 @@ impl VisitMut for ConstProp<'_> {
             *operand = Operand::Const(c)
         }
         self.super_visit_operand(operand, loc);
+    }
+
+    fn visit_body(&mut self, body: &mut crate::bc::types::Body) {
+        let cfg = body.cfg_mut();
+
+        let b = body.blocks().collect::<Vec<_>>();
+        for block in b {
+            let data = body.data_mut(block);
+
+            let loc = Location {
+                block,
+                instr: data.terminator_index(),
+            };
+            let term = &mut data.terminator;
+
+            if let Some((always_jump_to, never_jump_to)) = if let TerminatorKind::CondJump {
+                cond: Operand::Place(p_cond),
+                true_,
+                false_,
+            } = term.kind()
+                && p_cond.projection.is_empty()
+                && let ConstInfo::Const(Const::Bool(const_cond)) =
+                    self.info.get(loc).get(p_cond.local)
+            {
+                if *const_cond {
+                    Some((*true_, *false_))
+                } else {
+                    Some((*false_, *true_))
+                }
+            } else {
+                None
+            } {
+                term.kind = TerminatorKind::Jump(always_jump_to);
+                let edge_index = body
+                    .cfg_mut()
+                    .find_edge(block.into(), never_jump_to.into())
+                    .expect("there should be an edge here...");
+                let rem = body.cfg_mut().remove_edge(edge_index);
+                if rem.is_none() {
+                    panic!("ahhhh");
+                }
+            }
+        }
+
+        self.super_visit_body(body);
+    }
+
+    fn visit_terminator(&mut self, term: &mut crate::bc::types::Terminator, loc: Location) {
+        self.super_visit_terminator(term, loc);
     }
 
     fn visit_statement(&mut self, stmt: &mut Statement, loc: Location) {

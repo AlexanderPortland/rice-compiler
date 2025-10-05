@@ -7,7 +7,7 @@ use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, ve
 use itertools::Itertools;
 
 pub fn eliminate_dead_code(func: &mut Function) -> bool {
-    // println!("doing dead code");
+    // println!("DEAD CODE");
     let analysis_result = analyze_to_fixpoint(&DeadCodeAnalyis, func);
 
     let mut eliminator = DeadCodeElimination::new(&analysis_result);
