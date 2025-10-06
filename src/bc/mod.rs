@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use miette::Result;
 use strum::{Display, EnumString};
 
-use crate::bc::dataflow::dead_control;
+use crate::bc::dataflow::{dead_control, ptr};
 
 use self::types::{Function, Program};
 use dataflow::r#const::const_prop;
@@ -57,6 +57,7 @@ fn optimize_func(func: &mut Function) {
         Box::new(eliminate_dead_code),
         Box::new(dead_control::remove_unused_blocks),
         Box::new(dead_control::skip_empty_blocks),
+        Box::new(ptr::escape::stack_for_non_escaping),
     ];
 
     loop {

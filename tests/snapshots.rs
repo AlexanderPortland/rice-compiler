@@ -45,7 +45,8 @@ fn snapshots() -> Result<()> {
             None => "",
         };
 
-        let output = compile(path, "")?;
+        // Compile without optimizations first...
+        let output = compile(path, &("".to_string() + args))?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string() + "";
         let snapshot_path = path.parent().unwrap();
         insta::with_settings!({
@@ -55,7 +56,8 @@ fn snapshots() -> Result<()> {
           insta::assert_toml_snapshot!(name, output);
         });
 
-        let output = compile(path, " -O1")?;
+        // Compile with optimizations too to ensure they don't affect program behavior.
+        let output = compile(path, &(" -O1".to_string() + args))?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string() + ".opt";
         let snapshot_path = path.parent().unwrap();
         insta::with_settings!({

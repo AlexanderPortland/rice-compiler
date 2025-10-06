@@ -6,8 +6,8 @@ use crate::bc::{
 use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
 use itertools::Itertools;
 
+/// Eliminates **any 'dead' statement** that binds a place which isn't used in the rest of the program.
 pub fn eliminate_dead_code(func: &mut Function) -> bool {
-    // println!("DEAD CODE");
     let analysis_result = analyze_to_fixpoint(&DeadCodeAnalyis, func);
 
     let mut eliminator = DeadCodeElimination::new(&analysis_result);

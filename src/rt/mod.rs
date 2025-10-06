@@ -842,7 +842,7 @@ impl Frame<'_> {
                 args,
                 loc: _loc,
             } => {
-                log::debug!("eval rvalue alloc kind {kind:?}, args {args:?}");
+                // log::debug!("eval rvalue alloc kind {kind:?}, args {args:?}");
 
                 match args {
                     bc::AllocArgs::Lit(ops) => {

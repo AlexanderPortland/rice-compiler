@@ -17,20 +17,16 @@ use indexical::{
 };
 use itertools::Itertools;
 
+/// Propagates constants throughout the program, filling in their value.
+///
+/// Also simplifies control flow if a conditional jump can be determined to only ever take one branch.
 pub fn const_prop(func: &mut Function) -> bool {
-    // println!("CONST PROP");
     let analysis_result = analyze_to_fixpoint(&ConstAnalysis, func);
 
-    for location in func.body.locations().indices() {
-        // println!("at location {:?}", location);
-        let domain_here = &analysis_result[location];
-        for local in func.locals.indices() {
-            // println!("\tlocal {:?} has info {:?}", local, domain_here[local]);
-        }
-    }
-    let mut propogator = ConstProp::new(&analysis_result);
-    propogator.visit_function(func);
-    propogator.any_change
+    // Build and use a visitor to replace places using the result of our analysis.
+    let mut propagator = ConstProp::new(&analysis_result);
+    propagator.visit_function(func);
+    propagator.any_change
 }
 
 pub struct ConstProp<'z> {

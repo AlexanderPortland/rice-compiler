@@ -8,6 +8,10 @@ use crate::bc::{
 use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
 use itertools::Itertools;
 
+/// Remove **all unreachable basic blocks** from the CFG.
+///
+/// This has no real effect in terms of immediate functionality, but can simplify control flow
+/// in a way that will allow us to do other optimizations.
 pub fn remove_unused_blocks(func: &mut Function) -> bool {
     let mut global_changed = false;
     'done: loop {
@@ -38,6 +42,10 @@ pub fn remove_unused_blocks(func: &mut Function) -> bool {
     global_changed
 }
 
+// TODO: could also do some sort of terminator
+// TODO: also can probably merge straight-line blocks into a single one
+
+/// Modifies terminators to **skip over any empty basic blocks** that will immediately jump to another block.
 pub fn skip_empty_blocks(func: &mut Function) -> bool {
     let mut just_goes_to: HashMap<BasicBlockIdx, BasicBlockIdx> = HashMap::new();
     let body = &mut func.body;

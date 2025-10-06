@@ -1,4 +1,3 @@
-// -O1
 fn main() {
   let x = 2 in
   println(int_to_string(x))
