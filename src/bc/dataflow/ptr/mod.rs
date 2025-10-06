@@ -3,7 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use indexical::{ArcIndexSet, ArcIndexVec, IndexedDomain, set::IndexSet};
 
 use crate::bc::{
-    types::{AllocArgs, Function, Location, Operand, Place, ProjectionElem, Rvalue, Type},
+    types::{
+        AllocArgs, AllocKind, Function, Location, Operand, Place, ProjectionElem, Rvalue, Type,
+    },
     visit::Visit,
 };
 
@@ -140,7 +142,6 @@ impl InitialPointerAnalysis {
         ptrs: Vec<Ptr>,
         proj: &[ProjectionElem],
     ) -> Vec<Ptr> {
-        // println!("ptr alias on {:?}, proj {:?}", ptrs, proj);
         if proj.is_empty() {
             // println!("nvm proj is empty...");
             return ptrs;
@@ -171,20 +172,61 @@ impl InitialPointerAnalysis {
 impl Visit for InitialPointerAnalysis {
     fn visit_statement(&mut self, stmt: &crate::bc::types::Statement, loc: Location) {
         match &stmt.rvalue {
-            Rvalue::Alloc { args, .. } => {
+            Rvalue::Alloc { args, kind, .. } => {
                 // println!("alloc at loc {loc:?}");
                 self.el_constraints.push((Allocation(loc), stmt.place));
 
-                if let AllocArgs::Lit(ops) = args {
-                    for (index, op) in ops.iter().enumerate() {
-                        if let Operand::Place(place) = op {
-                            self.subset_constraints.push((
-                                *place,
-                                stmt.place.extend_projection(
-                                    [ProjectionElem::Field { index, ty: op.ty() }],
-                                    op.ty(),
-                                ),
-                            ));
+                match kind {
+                    AllocKind::Array => match args {
+                        AllocArgs::Lit(ops) => {
+                            for (index, op) in ops.iter().enumerate() {
+                                if let Operand::Place(place) = op {
+                                    self.subset_constraints.push((
+                                        *place,
+                                        stmt.place.extend_projection(
+                                            [ProjectionElem::Index {
+                                                index: Operand::Const(
+                                                    crate::bc::types::Const::Int(
+                                                        index.try_into().unwrap(),
+                                                    ),
+                                                ),
+                                                ty: op.ty(),
+                                            }],
+                                            op.ty(),
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
+                        AllocArgs::Repeated { op, count } => {
+                            if let Operand::Place(place) = op {
+                                self.subset_constraints.push((
+                                    *place,
+                                    stmt.place.extend_projection(
+                                        [ProjectionElem::Index {
+                                            index: Operand::Const(crate::bc::types::Const::Int(0)),
+                                            ty: op.ty(),
+                                        }],
+                                        op.ty(),
+                                    ),
+                                ));
+                            }
+                        }
+                    },
+                    AllocKind::Struct | AllocKind::Tuple => {
+                        // we can set each individually
+                        if let AllocArgs::Lit(ops) = args {
+                            for (index, op) in ops.iter().enumerate() {
+                                if let Operand::Place(place) = op {
+                                    self.subset_constraints.push((
+                                        *place,
+                                        stmt.place.extend_projection(
+                                            [ProjectionElem::Field { index, ty: op.ty() }],
+                                            op.ty(),
+                                        ),
+                                    ));
+                                }
+                            }
                         }
                     }
                 }

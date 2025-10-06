@@ -1,0 +1,10 @@
+fn foo() -> (int, [int]) {
+    let t = ((0, [0, 0]), (9, [1, 1])) in
+    (t.0).1 := [2, 2];
+    t.1
+}
+
+fn main() {
+    let t = foo() in
+    println(int_to_string(t.0))
+}
