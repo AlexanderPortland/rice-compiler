@@ -948,7 +948,7 @@ impl Frame<'_> {
                             self.stack_alloc_array(fields)?
                         }
                         (bc::AllocKind::Struct, bc::AllocLoc::Stack) => {
-                            unreachable!("can't allocate structs on the stack i think");
+                            self.stack_alloc_tuple(fields)?
                         }
                     }
                 }

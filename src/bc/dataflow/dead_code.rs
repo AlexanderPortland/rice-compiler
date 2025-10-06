@@ -63,6 +63,8 @@ impl crate::bc::visit::Visit for UpdateLiveSet<'_> {
     fn visit_lvalue(&mut self, place: &crate::bc::types::Place, _loc: Location) {
         if place.projection.is_empty() {
             self.0.remove(place.local);
+        } else {
+            self.0.insert(place.local);
         }
     }
 }
@@ -72,12 +74,56 @@ struct DeadCodeElimination<'z> {
     dead_locals: &'z ArcIndexVec<Location, IndexSet<Local>>,
 }
 
+#[derive(Default)]
+struct AnyArrayIndex(bool);
+
+impl Visit for AnyArrayIndex {
+    fn visit_rvalue_place(&mut self, place: &crate::bc::types::Place, _loc: Location) {
+        if place
+            .projection
+            .iter()
+            .any(|p| matches!(p, crate::bc::types::ProjectionElem::Index { .. }))
+        {
+            self.0 |= true;
+        }
+    }
+
+    fn visit_lvalue(&mut self, place: &crate::bc::types::Place, _loc: Location) {
+        if place
+            .projection
+            .iter()
+            .any(|p| matches!(p, crate::bc::types::ProjectionElem::Index { .. }))
+        {
+            self.0 |= true;
+        }
+    }
+}
+
 impl<'z> DeadCodeElimination<'z> {
     pub fn new(dead_locals: &'z ArcIndexVec<Location, IndexSet<Local>>) -> Self {
         Self {
             any_change: false,
             dead_locals,
         }
+    }
+
+    /// Checks if an rvalue could possibly have a sideffect beyond what it returns.
+    ///
+    /// Currently checks for any function or method calls, and any array indexing that could fail at runtime.
+    fn has_effect(stmt: &Statement, loc: Location) -> bool {
+        // println!("does {stmt} have effects?");
+
+        if matches!(stmt.rvalue, Rvalue::MethodCall { .. } | Rvalue::Call { .. }) {
+            return true;
+        }
+
+        let mut has_arrays = AnyArrayIndex::default();
+        has_arrays.visit_statement(stmt, loc);
+        if has_arrays.0 {
+            return true;
+        }
+
+        false
     }
 }
 
@@ -88,16 +134,11 @@ impl VisitMut for DeadCodeElimination<'_> {
             let (data, block) = (body.data_mut(block), block);
             let mut instr = 0;
             data.statements.retain(|stmt| {
-                let is_used = self
-                    .dead_locals
-                    .get(Location { block, instr })
-                    .contains(stmt.place.local);
-                let has_effect =
-                    matches!(stmt.rvalue, Rvalue::Call { .. } | Rvalue::MethodCall { .. });
-
+                let loc = Location { block, instr };
+                let is_used = self.dead_locals.get(loc).contains(stmt.place.local);
                 instr += 1;
 
-                if !is_used && !has_effect {
+                if !is_used && !Self::has_effect(stmt, loc) {
                     // REMOVE
                     self.any_change |= true;
                     change_here |= true;

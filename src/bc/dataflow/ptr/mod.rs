@@ -207,7 +207,11 @@ impl Visit for InitialPointerAnalysis {
                     }
                 }
             }
-            Rvalue::Operand(Operand::Place(p)) => self.subset_constraints.push((*p, stmt.place)),
+            Rvalue::Cast {
+                op: Operand::Place(p),
+                ..
+            }
+            | Rvalue::Operand(Operand::Place(p)) => self.subset_constraints.push((*p, stmt.place)),
             _ => (),
         }
 
