@@ -110,16 +110,23 @@ impl<'z> DeadCodeElimination<'z> {
     /// Checks if an rvalue could possibly have a sideffect beyond what it returns.
     ///
     /// Currently checks for any function or method calls, and any array indexing that could fail at runtime.
-    fn has_effect(stmt: &Statement, loc: Location) -> bool {
+    fn has_effect(num_params: usize, stmt: &Statement, loc: Location) -> bool {
         // println!("does {stmt} have effects?");
 
         if matches!(stmt.rvalue, Rvalue::MethodCall { .. } | Rvalue::Call { .. }) {
             return true;
         }
 
+        // Check if we access an element of an array.
+        // This could fail at runtime, so should not be optimized away
         let mut has_arrays = AnyArrayIndex::default();
         has_arrays.visit_statement(stmt, loc);
         if has_arrays.0 {
+            return true;
+        }
+
+        // Check if we modify a heap allocation passed into the function.
+        if !stmt.place.projection.is_empty() && stmt.place.local <= num_params {
             return true;
         }
 
@@ -128,8 +135,9 @@ impl<'z> DeadCodeElimination<'z> {
 }
 
 impl VisitMut for DeadCodeElimination<'_> {
-    fn visit_body(&mut self, body: &mut crate::bc::types::Body) {
+    fn visit_function(&mut self, func: &mut Function) {
         let mut change_here = false;
+        let body = &mut func.body;
         for block in body.blocks().collect_vec() {
             let (data, block) = (body.data_mut(block), block);
             let mut instr = 0;
@@ -138,7 +146,7 @@ impl VisitMut for DeadCodeElimination<'_> {
                 let is_used = self.dead_locals.get(loc).contains(stmt.place.local);
                 instr += 1;
 
-                if !is_used && !Self::has_effect(stmt, loc) {
+                if !is_used && !Self::has_effect(func.num_params, stmt, loc) {
                     // REMOVE
                     self.any_change |= true;
                     change_here |= true;

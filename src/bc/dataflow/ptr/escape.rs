@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::{
     bc::{
@@ -7,8 +10,8 @@ use crate::{
             ptr::{Allocation, InitialPointerAnalysis, Ptr},
         },
         types::{
-            AllocLoc, Function, Local, Location, Operand, Place, Rvalue, Statement, TerminatorKind,
-            Type,
+            AllocLoc, Function, Local, LocalIdx, Location, Operand, Place, Rvalue, Statement,
+            TerminatorKind, Type,
         },
         visit::{Visit, VisitMut},
     },
@@ -29,14 +32,19 @@ pub fn stack_for_non_escaping(func: &mut Function) -> bool {
 
     analysis.visit_function(func);
 
+    // println!("{}: analysis {:?}", func.name, analysis);
+
     let p = analysis.points_to();
 
-    let ret_places = ret_places(func);
-    // println!("ret places of {} are {:?}", func.name, ret_places);
+    for (ptr, allocations) in &p {
+        // println!("{}: {ptr} points to: ", func.name);
+        for alloc in allocations.iter() {
+            // println!("{}: \t->{alloc:?}", func.name);
+        }
+    }
 
-    let mut escapes = escapes(p, ret_places, alloc_domain);
+    let mut escapes = escapes(func, p, alloc_domain);
 
-    // todo!();
     escapes.visit_function(func);
 
     escapes.1
@@ -63,20 +71,25 @@ impl VisitMut for Escapes {
 }
 
 fn escapes(
+    func: &Function,
     points_to: HashMap<Ptr, ArcIndexSet<Allocation>>,
-    ret_places: Vec<Place>,
     domain: Arc<IndexedDomain<Allocation>>,
 ) -> Escapes {
     let mut escaping_allocations = ArcIndexSet::new(&domain);
+    let mut places = EscapingPlaces::default();
+    places.visit_function(func);
 
-    for ret_place in ret_places {
-        if let Some(direct_points_to) = points_to.get(&Ptr::Place(Place::new(
-            ret_place.local,
-            ret_place.projection.clone(),
-            Type::unit(),
-        ))) {
-            for direct in direct_points_to.iter() {
-                escaping_allocations.insert(direct);
+    for escaping in places.into_iter() {
+        for (ptr, allocations) in &points_to {
+            if let Ptr::Place(p) = ptr
+                && p.local == escaping.local
+            {
+                // if p.projection.len() >=
+                // println!("{}: {p} IS part of escaping {escaping}", func.name);
+                // let proj = &p.projection[..escaping.projection.len()]
+                escaping_allocations.union(allocations);
+            } else {
+                // println!("{}: {ptr} is NOT a part of escaping {escaping}", func.name);
             }
         }
     }
@@ -106,18 +119,58 @@ fn escapes(
     Escapes(escaping_allocations, false)
 }
 
-fn ret_places(func: &Function) -> Vec<Place> {
-    let mut places = RetPlaces(Vec::new());
-    places.visit_function(func);
-    places.0
+// fn ret_places(func: &Function) -> Vec<Place> {
+//     let mut places = EscapingPlaces::default();
+//     places.visit_function(func);
+//     println!("{}: places {:?}", func.name, places);
+//     todo!()
+// }
+
+#[derive(Default, Debug)]
+pub struct EscapingPlaces {
+    returned: Vec<Place>,
+    passed_to_callees: Vec<Place>,
+    caller_args: Vec<Place>,
 }
 
-pub struct RetPlaces(Vec<Place>);
+impl EscapingPlaces {
+    fn into_iter(self) -> impl Iterator<Item = Place> {
+        self.returned
+            .into_iter()
+            .chain(self.passed_to_callees)
+            .chain(self.caller_args)
+    }
+}
 
-impl Visit for RetPlaces {
+impl Visit for EscapingPlaces {
+    fn visit_function(&mut self, func: &Function) {
+        for param_no in 0..func.num_params {
+            // println!("param no {param_no:?} of {:?}", func.num_params);
+            self.caller_args.push(Place::new(
+                LocalIdx::from_usize(param_no),
+                vec![],
+                Type::bool(),
+            ))
+        }
+
+        self.super_visit_function(func);
+    }
+
+    fn visit_rvalue(&mut self, rvalue: &Rvalue, loc: Location) {
+        if let Rvalue::Call { args, .. } | Rvalue::MethodCall { args, .. } = rvalue {
+            for arg in args {
+                if let Operand::Place(place) = arg {
+                    self.passed_to_callees.push(*place);
+                }
+            }
+        }
+
+        self.super_visit_rvalue(rvalue, loc);
+    }
+
     fn visit_terminator(&mut self, term: &crate::bc::types::Terminator, loc: Location) {
         if let TerminatorKind::Return(Operand::Place(place)) = term.kind() {
-            self.0.push(*place);
+            self.returned.push(*place);
         }
         self.super_visit_terminator(term, loc);
     }

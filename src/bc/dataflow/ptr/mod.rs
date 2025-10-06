@@ -125,14 +125,26 @@ impl InitialPointerAnalysis {
     }
 
     fn aliases(points_to: &HashMap<Ptr, ArcIndexSet<Allocation>>, place: Place) -> Vec<Ptr> {
-        // println!("who aliases place {}?", place);
-        let ptrs = Self::ptr_aliases(
-            points_to,
-            vec![Ptr::Place(Place::new(place.local, vec![], Type::unit()))],
-            &place.projection,
-        );
-        for p in &ptrs {
-            // println!("\t -> {}", p);
+        // let ptrs = (0..place.projection.len())
+        //     .map(|i| {
+        //         let alias = Ptr::Place(Place::new(
+        //             place.local,
+        //             place.projection[..i].to_vec(),
+        //             Type::unit(),
+        //         ));
+        //         let then_project = &place.projection[i..];
+        //         Self::ptr_aliases(points_to, vec![alias], then_project)
+        //     })
+        //     .flatten()
+        //     .collect::<Vec<_>>();
+
+        let alias = Ptr::Place(Place::new(place.local, vec![], Type::unit()));
+        let then_project = &place.projection;
+        // println!("alias {alias}, then project {:?}", then_project);
+        let ptrs = Self::ptr_aliases(points_to, vec![alias], then_project);
+
+        if ptrs.is_empty() {
+            return vec![Ptr::Place(place)];
         }
         ptrs
     }
