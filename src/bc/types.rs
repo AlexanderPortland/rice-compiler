@@ -161,7 +161,9 @@ impl Body {
             0
         );
         assert_ne!(block_no, 0, "dont try to remove the first block you dofus");
-        // println!("removing block {:?}", block_no);
+
+        // clear all the statments, as we'll remove this block
+        self.data_mut(block_no).statements.clear();
 
         // remove all neighbors in the cfg
         for out_neighbor in self
