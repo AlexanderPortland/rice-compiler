@@ -21,9 +21,6 @@ use itertools::Itertools;
 
 /// Changes any heap allocations that don't escape their current function to be stack allocated instead.
 pub fn stack_for_non_escaping(func: &mut Function) -> bool {
-    if func.name == Symbol::main() {
-        return false;
-    }
     let alloc_domain = Arc::new(IndexedDomain::from_iter(
         func.body.locations().iter().map(|a| Allocation(*a)),
     ));
@@ -45,6 +42,7 @@ pub fn stack_for_non_escaping(func: &mut Function) -> bool {
     escapes.1
 }
 
+#[derive(Debug)]
 pub struct Escapes(ArcIndexSet<Allocation>, bool);
 
 impl VisitMut for Escapes {
@@ -54,7 +52,7 @@ impl VisitMut for Escapes {
             loc: alloc_loc,
             args,
         } = &mut stmt.rvalue
-            && self.0.contains(Allocation(loc))
+            && !self.0.contains(Allocation(loc))
             && *alloc_loc != crate::bc::types::AllocLoc::Stack
         {
             *alloc_loc = crate::bc::types::AllocLoc::Stack;

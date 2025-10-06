@@ -189,6 +189,24 @@ impl Visit for InitialPointerAnalysis {
                     }
                 }
             }
+            Rvalue::MethodCall { args, .. } | Rvalue::Call { args, .. } => {
+                for arg in args {
+                    if let Operand::Place(p) = arg {
+                        // All args can flow to output
+                        self.subset_constraints.push((*p, stmt.place));
+
+                        // All args can flow to each other
+                        for other_arg in args {
+                            if let Operand::Place(other_p) = other_arg
+                                && other_arg != arg
+                            {
+                                self.subset_constraints.push((*p, *other_p));
+                                self.subset_constraints.push((*other_p, *p));
+                            }
+                        }
+                    }
+                }
+            }
             Rvalue::Operand(Operand::Place(p)) => self.subset_constraints.push((*p, stmt.place)),
             _ => (),
         }

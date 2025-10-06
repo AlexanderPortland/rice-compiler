@@ -84,6 +84,18 @@ impl VisitMut for ConstProp<'_> {
                 } else {
                     Some((*false_, *true_))
                 }
+            } else if let TerminatorKind::CondJump {
+                cond: Operand::Const(c),
+                true_,
+                false_,
+            } = term.kind()
+                && let Const::Bool(const_cond) = c
+            {
+                if *const_cond {
+                    Some((*true_, *false_))
+                } else {
+                    Some((*false_, *true_))
+                }
             } else {
                 None
             } {
