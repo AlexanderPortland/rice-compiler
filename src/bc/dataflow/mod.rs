@@ -74,22 +74,16 @@ pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> Analys
         let mut new_in = state.get(loc).clone();
 
         let mut changed = false;
-        // println!("flow from {:?} to me in {:?}", flow_from, loc);
+
         for flow_from_loc in flow_from {
             changed |= new_in.join(&apply_transfer(analysis, &state, func, flow_from_loc));
-            // println!(
-            //     "from block {:?}, i have new, in {:?}",
-            //     flow_from_loc.block, loc.block
-            // );
         }
 
         if changed {
             *state.get_mut(loc) = new_in;
             for to in flow_to {
-                // println!("go tell {:?}", to);
                 to_visit.push_back(to);
             }
-            // to_visit.extend(flow_to);
         }
     }
 
@@ -102,7 +96,6 @@ fn apply_transfer<A: Analysis>(
     func: &Function,
     loc: Location,
 ) -> A::Domain {
-    // println!("loc {:?}", loc);
     let mut my_state = state.get(loc).clone();
     match func.body.instr(loc) {
         Either::Right(term) => {

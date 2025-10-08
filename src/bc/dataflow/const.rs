@@ -43,8 +43,6 @@ impl<'z> ConstProp<'z> {
     }
 }
 
-// fn always_jumps() -> Option<()
-
 impl VisitMut for ConstProp<'_> {
     fn visit_operand(&mut self, operand: &mut Operand, loc: Location) {
         if let Operand::Place(p) = operand
@@ -70,6 +68,7 @@ impl VisitMut for ConstProp<'_> {
             };
             let term = &mut data.terminator;
 
+            // I do not remember what shit i was on when i wrote this.
             if let Some((always_jump_to, never_jump_to)) = if let TerminatorKind::CondJump {
                 cond: Operand::Place(p_cond),
                 true_,
@@ -149,7 +148,6 @@ pub struct ConstAnalysis;
 pub enum ConstInfo {
     Unknown, // BOTTOM - known nothing
     Const(ast::Const),
-    // Func(Symbol, Type),
     Closure(Symbol),
     Variable, // TOP - know too much
 }
@@ -181,20 +179,15 @@ impl JoinSemiLattice for ArcIndexVec<Local, ConstInfo> {
         let mut changed = false;
         for (my_info, new_info) in self.iter_mut().zip(other.iter()) {
             if my_info == new_info {
-                // println!("we match!");
                 continue;
             }
 
-            // println!("i have {:?}, they have {:?}", my_info, new_info);
-
             match (*my_info).partial_cmp(new_info) {
                 Some(std::cmp::Ordering::Less) => {
-                    // println!("i learned...");
                     changed |= true;
                     *my_info = new_info.clone()
                 }
                 None => {
-                    // println!("we both learned...");
                     changed |= true;
                     *my_info = ConstInfo::Variable
                 }

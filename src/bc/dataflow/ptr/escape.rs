@@ -5,7 +5,7 @@ use std::{
 
 use crate::bc::{
     dataflow::ptr::{
-        pointer_analysis,
+        PointerAnalysis, pointer_analysis,
         types::{Allocation, MemLoc},
     },
     types::{
@@ -23,14 +23,7 @@ use itertools::Itertools;
 pub fn stack_for_non_escaping(func: &mut Function) -> bool {
     let analysis = pointer_analysis(func);
 
-    for (ptr, allocations) in analysis.points_to() {
-        // println!("{}: {ptr} points to: ", func.name);
-        for alloc in allocations.iter() {
-            // println!("{}: \t->{alloc:?}", func.name);
-        }
-    }
-
-    let mut escapes = escapes(func, analysis.points_to(), analysis.alloc_domain().clone());
+    let mut escapes = escapes(func, analysis);
 
     escapes.visit_function(func);
 
@@ -38,9 +31,10 @@ pub fn stack_for_non_escaping(func: &mut Function) -> bool {
 }
 
 #[derive(Debug)]
-pub struct Escapes(ArcIndexSet<Allocation>, bool);
+/// Switch all allocations not in the escaping set to the stack.
+pub struct StackAllocate(ArcIndexSet<Allocation>, bool);
 
-impl VisitMut for Escapes {
+impl VisitMut for StackAllocate {
     fn visit_statement(&mut self, stmt: &mut Statement, loc: Location) {
         if let Rvalue::Alloc {
             kind,
@@ -57,35 +51,28 @@ impl VisitMut for Escapes {
     }
 }
 
-fn escapes(
-    func: &Function,
-    points_to: &HashMap<MemLoc, ArcIndexSet<Allocation>>,
-    domain: Arc<IndexedDomain<Allocation>>,
-) -> Escapes {
-    let mut escaping_allocations = ArcIndexSet::new(&domain);
+fn escapes(func: &Function, analysis: PointerAnalysis) -> StackAllocate {
+    let mut escaping_allocations = ArcIndexSet::new(analysis.alloc_domain());
     let mut places = EscapingPlaces::default();
     places.visit_function(func);
 
+    // For all places that might escape...
     for escaping in places.into_iter() {
-        for (ptr, allocations) in points_to {
-            if let MemLoc::Local(l) = ptr
-                && *l == escaping.local
-            {
-                // if p.projection.len() >=
-                // println!("{}: {p} IS part of escaping {escaping}", func.name);
-                // let proj = &p.projection[..escaping.projection.len()]
+        // And all of the memory locations they could alias..
+        for mem_loc in analysis.could_refer_to(escaping) {
+            // The allocations those memory locations could point to may escape.
+            if let Some(allocations) = analysis.points_to().get(&mem_loc) {
                 escaping_allocations.union(allocations);
-            } else {
-                // println!("{}: {ptr} is NOT a part of escaping {escaping}", func.name);
             }
         }
     }
 
+    // Repeatedly keep trying to learn more about the escaping allocations from aliases.
     loop {
         let old_size = escaping_allocations.len();
 
         for allocation in escaping_allocations.iter().cloned().collect::<Vec<_>>() {
-            for (ptr, allocs) in points_to {
+            for (ptr, allocs) in analysis.points_to() {
                 if let MemLoc::Allocated(alloc, _proj) = ptr
                     && *alloc == allocation
                 {
@@ -94,16 +81,13 @@ fn escapes(
             }
         }
 
+        // If we don't learn anything new, we're done.
         if old_size == escaping_allocations.len() {
             break;
         }
     }
 
-    for alloc in escaping_allocations.iter() {
-        // println!("{alloc:?} escapes!");
-    }
-
-    Escapes(escaping_allocations, false)
+    StackAllocate(escaping_allocations, false)
 }
 
 #[derive(Default, Debug)]
@@ -124,8 +108,9 @@ impl EscapingPlaces {
 
 impl Visit for EscapingPlaces {
     fn visit_function(&mut self, func: &Function) {
-        for param_no in 0..func.num_params {
-            // println!("param no {param_no:?} of {:?}", func.num_params);
+        // All params can escape if you write into their allocations.
+        // We skip one because x0 is the environment.
+        for param_no in 1..func.num_params {
             self.caller_args.push(Place::new(
                 LocalIdx::from_usize(param_no),
                 vec![],
@@ -137,6 +122,7 @@ impl Visit for EscapingPlaces {
     }
 
     fn visit_rvalue(&mut self, rvalue: &Rvalue, loc: Location) {
+        // Arguments to function & method calls escape.
         if let Rvalue::Call { args, .. } | Rvalue::MethodCall { args, .. } = rvalue {
             for arg in args {
                 if let Operand::Place(place) = arg {
@@ -149,6 +135,7 @@ impl Visit for EscapingPlaces {
     }
 
     fn visit_terminator(&mut self, term: &crate::bc::types::Terminator, loc: Location) {
+        // Returned places escape.
         if let TerminatorKind::Return(Operand::Place(place)) = term.kind() {
             self.returned.push(*place);
         }

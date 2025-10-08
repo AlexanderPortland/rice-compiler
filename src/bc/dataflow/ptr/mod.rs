@@ -32,6 +32,7 @@ impl PointerAnalysis {
         }
     }
 
+    /// Gets the domain for allocations within this analysis.
     pub fn alloc_domain(&self) -> &Arc<IndexedDomain<Allocation>> {
         &self.domain
     }
@@ -40,16 +41,17 @@ impl PointerAnalysis {
         &self.points_to
     }
 
-    pub fn aliases(&self, place: Place) -> Vec<MemLoc> {
+    /// Find all memory locations a place could refer to.
+    pub fn could_refer_to(&self, place: Place) -> Vec<MemLoc> {
         let alias = MemLoc::Local(place.local);
         let then_project = &place.projection;
 
-        self.ptr_aliases(vec![alias.clone()], then_project)
+        self.could_refer_to_inner(vec![alias.clone()], then_project)
     }
 
-    fn ptr_aliases(&self, ptrs: Vec<MemLoc>, proj: &[ProjectionElem]) -> Vec<MemLoc> {
+    // Recursively find all allocations `ptrs` can point to and project an element.
+    fn could_refer_to_inner(&self, ptrs: Vec<MemLoc>, proj: &[ProjectionElem]) -> Vec<MemLoc> {
         if proj.is_empty() {
-            // println!("nvm proj is empty...");
             return ptrs;
         }
 
@@ -57,12 +59,8 @@ impl PointerAnalysis {
             .into_iter()
             .flat_map(|ptr| {
                 let Some(allocs) = self.points_to.get(&ptr) else {
-                    // println!("no info found for ptr {ptr:?}");
-                    // println!("on {:?}", points_to);
                     return Vec::new();
                 };
-
-                // println!("looking for what {ptr} points to, found allocs");
 
                 allocs
                     .iter()
@@ -70,8 +68,8 @@ impl PointerAnalysis {
                     .collect()
             })
             .collect();
-        // println!("new ptrs are {:?}", new_ptrs);
-        self.ptr_aliases(new_ptrs, &proj[1..])
+
+        self.could_refer_to_inner(new_ptrs, &proj[1..])
     }
 }
 
@@ -94,7 +92,7 @@ fn handle_imaginary_allocations(
         crate::bc::types::TypeKind::Array(inner_ty) => {
             let array_alloc = Allocation::new_imaginary(imaginary);
             el_constraints.push((array_alloc, to_place));
-            // println!("made imaginary for place {:?}", to_place);
+
             handle_imaginary_allocations(
                 *inner_ty,
                 to_place.extend_projection(
@@ -111,7 +109,7 @@ fn handle_imaginary_allocations(
         crate::bc::types::TypeKind::Tuple(inner_tys) => {
             let array_alloc = Allocation::new_imaginary(imaginary);
             el_constraints.push((array_alloc, to_place));
-            // println!("made imaginary for place {:?}", to_place);
+
             for (i, inner) in inner_tys.iter().enumerate() {
                 handle_imaginary_allocations(
                     *inner,
@@ -180,31 +178,22 @@ impl InitialPointerAnalysis {
     fn finalize(self) -> PointerAnalysis {
         let mut analysis = PointerAnalysis::new(&self);
 
-        // Handle all element constraints
+        // Handle all element constraints first
         for (alloc, to_place) in self.el_constraints {
-            for alias in analysis.aliases(to_place) {
-                let set = analysis
+            for alias in analysis.could_refer_to(to_place) {
+                let possible_allocations = analysis
                     .points_to
                     .entry(alias)
                     .or_insert(IndexSet::new(&self.domain));
 
-                set.insert(alloc);
-            }
-        }
-
-        // println!("AFTER EL CONSTRAINTS...");
-        for (ptr, allocs) in &analysis.points_to {
-            // println!("pointer {ptr}:");
-            for alloc in allocs.iter() {
-                // println!("\t -> {alloc:?}");
+                possible_allocations.insert(alloc);
             }
         }
 
         // Handle all subset constraints
         for (subset, superset) in self.subset_constraints {
-            for subset_alias in analysis.aliases(subset) {
-                for superset_alias in analysis.aliases(superset) {
-                    // println!("subset: {} <= {}", subset_alias, superset_alias);
+            for subset_alias in analysis.could_refer_to(subset) {
+                for superset_alias in analysis.could_refer_to(superset) {
                     if let Some(subset) = analysis.points_to.get(&subset_alias).cloned() {
                         let superset = analysis
                             .points_to
@@ -212,22 +201,11 @@ impl InitialPointerAnalysis {
                             .or_insert(IndexSet::new(&self.domain));
 
                         superset.union(&subset);
-                    } else {
-                        // println!("AHHHH - nothing found for subset {:?}", subset_alias)
                     }
                 }
             }
         }
 
-        // println!("FINAL BINDINGS");
-        for (ptr, allocs) in &analysis.points_to {
-            // println!("pointer {ptr}:");
-            for alloc in allocs.iter() {
-                // println!("\t -> {alloc:?}");
-            }
-        }
-
-        // todo!();
         analysis
     }
 }
@@ -236,7 +214,6 @@ impl Visit for InitialPointerAnalysis {
     fn visit_statement(&mut self, stmt: &crate::bc::types::Statement, loc: Location) {
         match &stmt.rvalue {
             Rvalue::Alloc { args, kind, .. } => {
-                // println!("alloc at loc {loc:?}");
                 self.el_constraints
                     .push((Allocation::from_loc(loc), stmt.place));
 
@@ -262,20 +239,22 @@ impl Visit for InitialPointerAnalysis {
                                 }
                             }
                         }
-                        AllocArgs::Repeated { op, count } => {
-                            if let Operand::Place(place) = op {
-                                self.subset_constraints.push((
-                                    *place,
-                                    stmt.place.extend_projection(
-                                        [ProjectionElem::Index {
-                                            index: Operand::Const(crate::bc::types::Const::Int(0)),
-                                            ty: op.ty(),
-                                        }],
-                                        op.ty(),
-                                    ),
-                                ));
-                            }
+                        AllocArgs::Repeated {
+                            op: Operand::Place(place),
+                            count,
+                        } => {
+                            self.subset_constraints.push((
+                                *place,
+                                stmt.place.extend_projection(
+                                    [ProjectionElem::Index {
+                                        index: Operand::Const(crate::bc::types::Const::Int(0)),
+                                        ty: Type::unit(),
+                                    }],
+                                    Type::unit(),
+                                ),
+                            ));
                         }
+                        _ => (),
                     },
                     AllocKind::Struct | AllocKind::Tuple => {
                         // we can set each individually
