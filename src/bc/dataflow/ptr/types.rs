@@ -4,7 +4,8 @@ use indexical::{ArcIndexSet, ArcIndexVec, IndexedDomain, set::IndexSet};
 
 use crate::bc::{
     types::{
-        AllocArgs, AllocKind, Function, Location, Operand, Place, ProjectionElem, Rvalue, Type,
+        AllocArgs, AllocKind, Function, Local, LocalIdx, Location, Operand, Place, ProjectionElem,
+        Rvalue, Type,
     },
     visit::Visit,
 };
@@ -14,7 +15,7 @@ use crate::bc::{
 pub enum MemLoc {
     // TODO: should be a local instead
     /// A normal value stored in a place (on the stack).
-    Place(Place),
+    Local(LocalIdx),
     /// A tuple value within an allocation (that may be on the heap).
     Allocated(Allocation, AllocProj),
 }
@@ -22,7 +23,7 @@ pub enum MemLoc {
 impl std::fmt::Display for MemLoc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MemLoc::Place(p) => <Place as std::fmt::Display>::fmt(p, f),
+            MemLoc::Local(l) => <LocalIdx as std::fmt::Display>::fmt(l, f),
             MemLoc::Allocated(..) => <Self as std::fmt::Debug>::fmt(self, f),
         }
     }

@@ -41,15 +41,10 @@ impl PointerAnalysis {
     }
 
     pub fn aliases(&self, place: Place) -> Vec<MemLoc> {
-        let alias = MemLoc::Place(Place::new(place.local, vec![], Type::unit()));
+        let alias = MemLoc::Local(place.local);
         let then_project = &place.projection;
 
-        let ptrs = self.ptr_aliases(vec![alias], then_project);
-
-        if ptrs.is_empty() {
-            return vec![MemLoc::Place(place)];
-        }
-        ptrs
+        self.ptr_aliases(vec![alias.clone()], then_project)
     }
 
     fn ptr_aliases(&self, ptrs: Vec<MemLoc>, proj: &[ProjectionElem]) -> Vec<MemLoc> {
@@ -99,6 +94,7 @@ fn handle_imaginary_allocations(
         crate::bc::types::TypeKind::Array(inner_ty) => {
             let array_alloc = Allocation::new_imaginary(imaginary);
             el_constraints.push((array_alloc, to_place));
+            // println!("made imaginary for place {:?}", to_place);
             handle_imaginary_allocations(
                 *inner_ty,
                 to_place.extend_projection(
@@ -115,6 +111,7 @@ fn handle_imaginary_allocations(
         crate::bc::types::TypeKind::Tuple(inner_tys) => {
             let array_alloc = Allocation::new_imaginary(imaginary);
             el_constraints.push((array_alloc, to_place));
+            // println!("made imaginary for place {:?}", to_place);
             for (i, inner) in inner_tys.iter().enumerate() {
                 handle_imaginary_allocations(
                     *inner,
@@ -134,26 +131,35 @@ fn handle_imaginary_allocations(
     }
 }
 
+struct ImaginaryAllocationsVisitor<'z>(&'z mut Vec<Allocation>, &'z mut Vec<(Allocation, Place)>);
+
+impl Visit for ImaginaryAllocationsVisitor<'_> {
+    fn visit_function(&mut self, func: &Function) {
+        // println!("visiting for imaginary on func {}", func.name);
+        for (idx, ty) in func.params().skip(1) {
+            let place = Place::new(idx, vec![], Type::unit());
+            handle_imaginary_allocations(ty, place, self.0, self.1);
+        }
+
+        self.super_visit_function(func);
+    }
+
+    fn visit_statement(&mut self, stmt: &crate::bc::types::Statement, loc: Location) {
+        handle_imaginary_allocations(stmt.place.ty, stmt.place, self.0, self.1);
+    }
+}
+
 impl InitialPointerAnalysis {
     pub fn new(func: &Function) -> Self {
         let mut el_constraints = Vec::new();
         let mut subset_constraints = Vec::new();
         let mut imaginary_allocations = Vec::new();
 
-        for (idx, ty) in func.params().skip(1) {
-            let place = Place::new(idx, vec![], Type::unit());
-            handle_imaginary_allocations(
-                ty,
-                place,
-                &mut imaginary_allocations,
-                &mut el_constraints,
-            );
-        }
-
-        // let mut num_allocs =
-        // TODO: construct imaginary allocations here...
-        // println!("el constraints {:?}", el_constraints);
-        // todo!();
+        // Have to handle the imaginary allocations here, so we can properly build the
+        // allocation domain for the function. Otherwise, it might make more sense to do this with the other visitor.
+        // TODO: LMAO im just realizing that's dumb and we totally could construct the domain after.
+        ImaginaryAllocationsVisitor(&mut imaginary_allocations, &mut el_constraints)
+            .visit_function(func);
 
         let domain = Arc::new(IndexedDomain::from_iter(
             func.body

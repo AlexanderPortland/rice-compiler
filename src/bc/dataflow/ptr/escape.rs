@@ -68,8 +68,8 @@ fn escapes(
 
     for escaping in places.into_iter() {
         for (ptr, allocations) in points_to {
-            if let MemLoc::Place(p) = ptr
-                && p.local == escaping.local
+            if let MemLoc::Local(l) = ptr
+                && *l == escaping.local
             {
                 // if p.projection.len() >=
                 // println!("{}: {p} IS part of escaping {escaping}", func.name);
