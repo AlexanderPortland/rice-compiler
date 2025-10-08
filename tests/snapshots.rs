@@ -52,6 +52,9 @@ fn snapshots() -> Result<()> {
         insta::with_settings!({
           snapshot_path => snapshot_path,
           prepend_module_to_snapshot => false,
+          filters => vec![
+            (r"thread 'main' \((.*?)\)", r"thread 'main' ([some PID])")
+          ],
         }, {
           insta::assert_toml_snapshot!(name, output);
         });
@@ -63,6 +66,9 @@ fn snapshots() -> Result<()> {
         insta::with_settings!({
           snapshot_path => snapshot_path,
           prepend_module_to_snapshot => false,
+          filters => vec![
+            (r"thread 'main' \((.*?)\)", r"thread 'main' ([some PID])")
+          ],
         }, {
           insta::assert_toml_snapshot!(name, output);
         });

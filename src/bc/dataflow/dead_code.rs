@@ -1,6 +1,6 @@
 use crate::bc::{
     dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
-    types::{Function, Local, Location, Operand, Rvalue, Statement},
+    types::{Binop, Function, Local, Location, Operand, Rvalue, Statement},
     visit::{Visit, VisitMut},
 };
 use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
@@ -78,6 +78,13 @@ struct DeadCodeElimination<'z> {
 struct AnyArrayIndex(bool);
 
 impl Visit for AnyArrayIndex {
+    fn visit_rvalue(&mut self, rvalue: &Rvalue, loc: Location) {
+        if matches!(rvalue, Rvalue::Binop { op: Binop::Div, .. }) {
+            self.0 |= true;
+        }
+
+        self.super_visit_rvalue(rvalue, loc);
+    }
     fn visit_rvalue_place(&mut self, place: &crate::bc::types::Place, _loc: Location) {
         if place
             .projection

@@ -40,7 +40,7 @@ features = ["gc-drc", "runtime", "std", "cranelift"]
 lalrpop = "0.20.0"
 
 [dev-dependencies]
-insta = { version = "1.43.1", features = ["toml"] }
+insta = { version = "1.43.1", features = ["toml", "filters"] }
 shlex = "1.3.0"
 walkdir = "2.5.0"
 

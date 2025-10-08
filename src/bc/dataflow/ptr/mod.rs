@@ -49,7 +49,7 @@ impl PointerAnalysis {
         self.could_refer_to_inner(vec![alias.clone()], then_project)
     }
 
-    // Recursively find all allocations `ptrs` can point to and project an element.
+    // Find the allocations that `ptrs` could refer to and project into them, repeating until `proj` is empty.
     fn could_refer_to_inner(&self, ptrs: Vec<MemLoc>, proj: &[ProjectionElem]) -> Vec<MemLoc> {
         if proj.is_empty() {
             return ptrs;
