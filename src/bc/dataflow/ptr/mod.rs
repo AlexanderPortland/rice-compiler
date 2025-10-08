@@ -15,9 +15,7 @@ mod types;
 
 pub fn pointer_analysis(func: &Function) -> PointerAnalysis {
     let mut analysis = InitialPointerAnalysis::new(func);
-
     analysis.visit_function(func);
-
     analysis.finalize()
 }
 
@@ -91,18 +89,85 @@ struct InitialPointerAnalysis {
     subset_constraints: Vec<(Place, Place)>,
 }
 
+fn handle_imaginary_allocations(
+    of_ty: Type,
+    to_place: Place,
+    imaginary: &mut Vec<Allocation>,
+    el_constraints: &mut Vec<(Allocation, Place)>,
+) {
+    match of_ty.kind() {
+        crate::bc::types::TypeKind::Array(inner_ty) => {
+            let array_alloc = Allocation::new_imaginary(imaginary);
+            el_constraints.push((array_alloc, to_place));
+            handle_imaginary_allocations(
+                *inner_ty,
+                to_place.extend_projection(
+                    [ProjectionElem::Index {
+                        index: Operand::Const(crate::bc::types::Const::Int(0)),
+                        ty: Type::unit(),
+                    }],
+                    Type::unit(),
+                ),
+                imaginary,
+                el_constraints,
+            );
+        }
+        crate::bc::types::TypeKind::Tuple(inner_tys) => {
+            let array_alloc = Allocation::new_imaginary(imaginary);
+            el_constraints.push((array_alloc, to_place));
+            for (i, inner) in inner_tys.iter().enumerate() {
+                handle_imaginary_allocations(
+                    *inner,
+                    to_place.extend_projection(
+                        [ProjectionElem::Field {
+                            index: i,
+                            ty: Type::unit(),
+                        }],
+                        Type::unit(),
+                    ),
+                    imaginary,
+                    el_constraints,
+                );
+            }
+        }
+        _ => (),
+    }
+}
+
 impl InitialPointerAnalysis {
     pub fn new(func: &Function) -> Self {
+        let mut el_constraints = Vec::new();
+        let mut subset_constraints = Vec::new();
+        let mut imaginary_allocations = Vec::new();
+
+        for (idx, ty) in func.params().skip(1) {
+            let place = Place::new(idx, vec![], Type::unit());
+            handle_imaginary_allocations(
+                ty,
+                place,
+                &mut imaginary_allocations,
+                &mut el_constraints,
+            );
+        }
+
+        // let mut num_allocs =
+        // TODO: construct imaginary allocations here...
+        // println!("el constraints {:?}", el_constraints);
+        // todo!();
+
         let domain = Arc::new(IndexedDomain::from_iter(
             func.body
                 .locations()
                 .iter()
-                .map(|a| Allocation::from_loc(*a)),
+                .map(|a| Allocation::from_loc(*a))
+                .chain(imaginary_allocations),
         ));
+
+        // let imaginary_allocations =
         InitialPointerAnalysis {
             domain,
-            el_constraints: Vec::new(),
-            subset_constraints: Vec::new(),
+            el_constraints,
+            subset_constraints,
         }
     }
 

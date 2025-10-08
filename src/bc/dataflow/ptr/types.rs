@@ -36,15 +36,27 @@ pub enum AllocProj {
 
 /// An allocation, identified by the location at which it was allocated.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct Allocation(Location);
+pub enum Allocation {
+    /// An abstract allocation that we know exists somewhere,
+    /// but was not allocated in the given function.
+    Abstract(usize),
+    /// A 'real' allocation made within the current function at a given location.
+    Real(Location),
+}
 
 indexical::define_index_type! {
     pub struct AllocationIdx for Allocation = u32;
 }
 
 impl Allocation {
+    pub fn new_imaginary(existing: &mut Vec<Allocation>) -> Self {
+        let new = Allocation::Abstract(existing.len());
+        existing.push(new);
+        new
+    }
+
     pub fn from_loc(loc: Location) -> Self {
-        Allocation(loc)
+        Self::Real(loc)
     }
 
     pub fn with_index_proj(&self, proj: &ProjectionElem) -> MemLoc {
