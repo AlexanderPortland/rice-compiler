@@ -3,19 +3,16 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    bc::{
-        dataflow::{
-            self, Analysis, JoinSemiLattice, analyze_to_fixpoint,
-            ptr::{Allocation, InitialPointerAnalysis, Ptr},
-        },
-        types::{
-            AllocLoc, Function, Local, LocalIdx, Location, Operand, Place, Rvalue, Statement,
-            TerminatorKind, Type,
-        },
-        visit::{Visit, VisitMut},
+use crate::bc::{
+    dataflow::ptr::{
+        pointer_analysis,
+        types::{Allocation, MemLoc},
     },
-    utils::Symbol,
+    types::{
+        AllocLoc, Function, LocalIdx, Location, Operand, Place, Rvalue, Statement, TerminatorKind,
+        Type,
+    },
+    visit::{Visit, VisitMut},
 };
 use indexical::{
     ArcIndexSet, ArcIndexVec, IndexedDomain, RcIndexSet, pointer::PointerFamily, vec::IndexVec,
@@ -24,26 +21,16 @@ use itertools::Itertools;
 
 /// Changes any heap allocations that don't escape their current function to be stack allocated instead.
 pub fn stack_for_non_escaping(func: &mut Function) -> bool {
-    let alloc_domain = Arc::new(IndexedDomain::from_iter(
-        func.body.locations().iter().map(|a| Allocation(*a)),
-    ));
+    let analysis = pointer_analysis(func);
 
-    let mut analysis = InitialPointerAnalysis::new(alloc_domain.clone());
-
-    analysis.visit_function(func);
-
-    // println!("{}: analysis {:?}", func.name, analysis);
-
-    let p = analysis.points_to();
-
-    for (ptr, allocations) in &p {
+    for (ptr, allocations) in analysis.points_to() {
         // println!("{}: {ptr} points to: ", func.name);
         for alloc in allocations.iter() {
             // println!("{}: \t->{alloc:?}", func.name);
         }
     }
 
-    let mut escapes = escapes(func, p, alloc_domain);
+    let mut escapes = escapes(func, analysis.points_to(), analysis.alloc_domain().clone());
 
     escapes.visit_function(func);
 
@@ -60,7 +47,7 @@ impl VisitMut for Escapes {
             loc: alloc_loc,
             args,
         } = &mut stmt.rvalue
-            && !self.0.contains(Allocation(loc))
+            && !self.0.contains(Allocation::from_loc(loc))
             && *alloc_loc != crate::bc::types::AllocLoc::Stack
         {
             *alloc_loc = crate::bc::types::AllocLoc::Stack;
@@ -72,7 +59,7 @@ impl VisitMut for Escapes {
 
 fn escapes(
     func: &Function,
-    points_to: HashMap<Ptr, ArcIndexSet<Allocation>>,
+    points_to: &HashMap<MemLoc, ArcIndexSet<Allocation>>,
     domain: Arc<IndexedDomain<Allocation>>,
 ) -> Escapes {
     let mut escaping_allocations = ArcIndexSet::new(&domain);
@@ -80,8 +67,8 @@ fn escapes(
     places.visit_function(func);
 
     for escaping in places.into_iter() {
-        for (ptr, allocations) in &points_to {
-            if let Ptr::Place(p) = ptr
+        for (ptr, allocations) in points_to {
+            if let MemLoc::Place(p) = ptr
                 && p.local == escaping.local
             {
                 // if p.projection.len() >=
@@ -98,8 +85,8 @@ fn escapes(
         let old_size = escaping_allocations.len();
 
         for allocation in escaping_allocations.iter().cloned().collect::<Vec<_>>() {
-            for (ptr, allocs) in &points_to {
-                if let Ptr::AllocationEl(alloc, _proj) = ptr
+            for (ptr, allocs) in points_to {
+                if let MemLoc::Allocated(alloc, _proj) = ptr
                     && *alloc == allocation
                 {
                     escaping_allocations.union(allocs);
@@ -118,13 +105,6 @@ fn escapes(
 
     Escapes(escaping_allocations, false)
 }
-
-// fn ret_places(func: &Function) -> Vec<Place> {
-//     let mut places = EscapingPlaces::default();
-//     places.visit_function(func);
-//     println!("{}: places {:?}", func.name, places);
-//     todo!()
-// }
 
 #[derive(Default, Debug)]
 pub struct EscapingPlaces {

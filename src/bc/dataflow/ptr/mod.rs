@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use indexical::{ArcIndexSet, ArcIndexVec, IndexedDomain, set::IndexSet};
 
 use crate::bc::{
+    dataflow::ptr::types::{Allocation, MemLoc},
     types::{
         AllocArgs, AllocKind, Function, Location, Operand, Place, ProjectionElem, Rvalue, Type,
     },
@@ -10,150 +11,50 @@ use crate::bc::{
 };
 
 pub mod escape;
+mod types;
 
-/// Something that can *point to* an allocation.
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
-enum Ptr {
-    /// A normal value stored in a place (on the stack).
-    Place(Place),
-    /// A tuple value within an allocation (that may be on the heap).
-    AllocationEl(Allocation, AllocProj),
+pub fn pointer_analysis(func: &Function) -> PointerAnalysis {
+    let mut analysis = InitialPointerAnalysis::new(func);
+
+    analysis.visit_function(func);
+
+    analysis.finalize()
 }
 
-impl std::fmt::Display for Ptr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Ptr::Place(p) => <Place as std::fmt::Display>::fmt(p, f),
-            Ptr::AllocationEl(..) => <Self as std::fmt::Debug>::fmt(self, f),
-        }
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-enum AllocProj {
-    Index,
-    Field(usize),
-}
-
-/// An allocation, identified by the location at which it was allocated.
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-struct Allocation(Location);
-
-indexical::define_index_type! {
-    struct AllocationIdx for Allocation = u32;
-}
-
-impl Allocation {
-    fn with_index_proj(&self, proj: &ProjectionElem) -> Ptr {
-        let proj = match proj {
-            ProjectionElem::Field { index, .. } => AllocProj::Field(*index),
-            ProjectionElem::Index { .. } => AllocProj::Index,
-        };
-
-        Ptr::AllocationEl(*self, proj)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct InitialPointerAnalysis {
+pub struct PointerAnalysis {
     domain: Arc<IndexedDomain<Allocation>>,
-    /// `(a, p)` where `a` is in `p`
-    el_constraints: Vec<(Allocation, Place)>,
-    /// `(p1, p2)` where `p1 <= p2`
-    subset_constraints: Vec<(Place, Place)>,
+    points_to: HashMap<MemLoc, ArcIndexSet<Allocation>>,
 }
 
-impl InitialPointerAnalysis {
-    pub fn new(domain: Arc<IndexedDomain<Allocation>>) -> Self {
-        InitialPointerAnalysis {
-            domain,
-            el_constraints: Vec::new(),
-            subset_constraints: Vec::new(),
+impl PointerAnalysis {
+    fn new(from: &InitialPointerAnalysis) -> Self {
+        Self {
+            domain: from.domain.clone(),
+            points_to: HashMap::new(),
         }
     }
 
-    fn points_to(self) -> HashMap<Ptr, ArcIndexSet<Allocation>> {
-        let mut points_to: HashMap<Ptr, ArcIndexSet<Allocation>> = HashMap::new();
-
-        // Handle all element constraints
-        for (alloc, to_place) in self.el_constraints {
-            for alias in Self::aliases(&points_to, to_place) {
-                let set = points_to
-                    .entry(alias)
-                    .or_insert(IndexSet::new(&self.domain));
-
-                set.insert(alloc);
-            }
-        }
-
-        // println!("AFTER EL CONSTRAINTS...");
-        for (ptr, allocs) in &points_to {
-            // println!("pointer {ptr}:");
-            for alloc in allocs.iter() {
-                // println!("\t -> {alloc:?}");
-            }
-        }
-
-        // Handle all subset constraints
-        for (subset, superset) in self.subset_constraints {
-            for subset_alias in Self::aliases(&points_to, subset) {
-                for superset_alias in Self::aliases(&points_to, superset) {
-                    // println!("subset: {} <= {}", subset_alias, superset_alias);
-                    if let Some(subset) = points_to.get(&subset_alias).cloned() {
-                        let superset = points_to
-                            .entry(superset_alias)
-                            .or_insert(IndexSet::new(&self.domain));
-
-                        superset.union(&subset);
-                    } else {
-                        // println!("AHHHH - nothing found for subset {:?}", subset_alias)
-                    }
-                }
-            }
-        }
-
-        // println!("FINAL BINDINGS");
-        for (ptr, allocs) in &points_to {
-            // println!("pointer {ptr}:");
-            for alloc in allocs.iter() {
-                // println!("\t -> {alloc:?}");
-            }
-        }
-
-        // todo!();
-        points_to
+    pub fn alloc_domain(&self) -> &Arc<IndexedDomain<Allocation>> {
+        &self.domain
     }
 
-    fn aliases(points_to: &HashMap<Ptr, ArcIndexSet<Allocation>>, place: Place) -> Vec<Ptr> {
-        // let ptrs = (0..place.projection.len())
-        //     .map(|i| {
-        //         let alias = Ptr::Place(Place::new(
-        //             place.local,
-        //             place.projection[..i].to_vec(),
-        //             Type::unit(),
-        //         ));
-        //         let then_project = &place.projection[i..];
-        //         Self::ptr_aliases(points_to, vec![alias], then_project)
-        //     })
-        //     .flatten()
-        //     .collect::<Vec<_>>();
+    pub fn points_to(&self) -> &HashMap<MemLoc, ArcIndexSet<Allocation>> {
+        &self.points_to
+    }
 
-        let alias = Ptr::Place(Place::new(place.local, vec![], Type::unit()));
+    pub fn aliases(&self, place: Place) -> Vec<MemLoc> {
+        let alias = MemLoc::Place(Place::new(place.local, vec![], Type::unit()));
         let then_project = &place.projection;
-        // println!("alias {alias}, then project {:?}", then_project);
-        let ptrs = Self::ptr_aliases(points_to, vec![alias], then_project);
+
+        let ptrs = self.ptr_aliases(vec![alias], then_project);
 
         if ptrs.is_empty() {
-            return vec![Ptr::Place(place)];
+            return vec![MemLoc::Place(place)];
         }
         ptrs
     }
 
-    fn ptr_aliases(
-        points_to: &HashMap<Ptr, ArcIndexSet<Allocation>>,
-        ptrs: Vec<Ptr>,
-        proj: &[ProjectionElem],
-    ) -> Vec<Ptr> {
+    fn ptr_aliases(&self, ptrs: Vec<MemLoc>, proj: &[ProjectionElem]) -> Vec<MemLoc> {
         if proj.is_empty() {
             // println!("nvm proj is empty...");
             return ptrs;
@@ -162,7 +63,7 @@ impl InitialPointerAnalysis {
         let new_ptrs = ptrs
             .into_iter()
             .flat_map(|ptr| {
-                let Some(allocs) = points_to.get(&ptr) else {
+                let Some(allocs) = self.points_to.get(&ptr) else {
                     // println!("no info found for ptr {ptr:?}");
                     // println!("on {:?}", points_to);
                     return Vec::new();
@@ -177,7 +78,86 @@ impl InitialPointerAnalysis {
             })
             .collect();
         // println!("new ptrs are {:?}", new_ptrs);
-        Self::ptr_aliases(points_to, new_ptrs, &proj[1..])
+        self.ptr_aliases(new_ptrs, &proj[1..])
+    }
+}
+
+#[derive(Debug, Clone)]
+struct InitialPointerAnalysis {
+    domain: Arc<IndexedDomain<Allocation>>,
+    /// `(a, p)` where `a` is in `p`
+    el_constraints: Vec<(Allocation, Place)>,
+    /// `(p1, p2)` where `p1 <= p2`
+    subset_constraints: Vec<(Place, Place)>,
+}
+
+impl InitialPointerAnalysis {
+    pub fn new(func: &Function) -> Self {
+        let domain = Arc::new(IndexedDomain::from_iter(
+            func.body
+                .locations()
+                .iter()
+                .map(|a| Allocation::from_loc(*a)),
+        ));
+        InitialPointerAnalysis {
+            domain,
+            el_constraints: Vec::new(),
+            subset_constraints: Vec::new(),
+        }
+    }
+
+    fn finalize(self) -> PointerAnalysis {
+        let mut analysis = PointerAnalysis::new(&self);
+
+        // Handle all element constraints
+        for (alloc, to_place) in self.el_constraints {
+            for alias in analysis.aliases(to_place) {
+                let set = analysis
+                    .points_to
+                    .entry(alias)
+                    .or_insert(IndexSet::new(&self.domain));
+
+                set.insert(alloc);
+            }
+        }
+
+        // println!("AFTER EL CONSTRAINTS...");
+        for (ptr, allocs) in &analysis.points_to {
+            // println!("pointer {ptr}:");
+            for alloc in allocs.iter() {
+                // println!("\t -> {alloc:?}");
+            }
+        }
+
+        // Handle all subset constraints
+        for (subset, superset) in self.subset_constraints {
+            for subset_alias in analysis.aliases(subset) {
+                for superset_alias in analysis.aliases(superset) {
+                    // println!("subset: {} <= {}", subset_alias, superset_alias);
+                    if let Some(subset) = analysis.points_to.get(&subset_alias).cloned() {
+                        let superset = analysis
+                            .points_to
+                            .entry(superset_alias)
+                            .or_insert(IndexSet::new(&self.domain));
+
+                        superset.union(&subset);
+                    } else {
+                        // println!("AHHHH - nothing found for subset {:?}", subset_alias)
+                    }
+                }
+            }
+        }
+
+        // println!("FINAL BINDINGS");
+        for (ptr, allocs) in &analysis.points_to {
+            // println!("pointer {ptr}:");
+            for alloc in allocs.iter() {
+                // println!("\t -> {alloc:?}");
+            }
+        }
+
+        // todo!();
+        analysis
     }
 }
 
@@ -186,7 +166,8 @@ impl Visit for InitialPointerAnalysis {
         match &stmt.rvalue {
             Rvalue::Alloc { args, kind, .. } => {
                 // println!("alloc at loc {loc:?}");
-                self.el_constraints.push((Allocation(loc), stmt.place));
+                self.el_constraints
+                    .push((Allocation::from_loc(loc), stmt.place));
 
                 match kind {
                     AllocKind::Array => match args {
