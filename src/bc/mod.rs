@@ -55,15 +55,24 @@ fn optimize_func(func: &mut Function) {
         // TODO: insert passes here
         Box::new(const_prop),
         Box::new(eliminate_dead_code),
-        Box::new(dead_control::remove_unused_blocks),
         Box::new(dead_control::skip_empty_blocks),
         Box::new(ptr::escape::stack_for_non_escaping),
+        Box::new(dead_control::merge_straight_line_blocks),
+    ];
+
+    let cleanup_passes: Vec<Pass> = vec![
+        Box::new(dead_control::remove_unused_blocks),
+        Box::new(dead_control::remove_unused_locals),
     ];
 
     loop {
         let mut changed = false;
         for pass in &passes {
             changed |= pass(func);
+
+            for cleanup in &cleanup_passes {
+                cleanup(func);
+            }
         }
         if !changed {
             break;
