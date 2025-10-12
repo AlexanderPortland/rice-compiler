@@ -1,0 +1,4 @@
+fn main() {
+  let x = if true { 2 } else { 2 } in
+  println(int_to_string(x))
+}

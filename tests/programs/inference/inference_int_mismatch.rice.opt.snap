@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × type mismatch
+   ╭─[inference_int_mismatch.rice:3:11]
+ 2 │   let x: _ = 2 in
+ 3 │   println(x)
+   ·           ┬
+   ·           ╰── expected `string`, found `int`
+ 4 │ }
+   ╰────
+
+'''

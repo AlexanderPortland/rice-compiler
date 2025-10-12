@@ -1,0 +1,14 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = true
+stdout = '''
+13
+2
+13
+2
+13
+2
+'''
+stderr = ''

@@ -14,6 +14,7 @@ fn compile(path: &Path, args: &str) -> Result<CompilerOutput> {
     let mut cmd = Command::new("./target/debug/rice");
     cmd.arg(path);
     cmd.args(shlex::split(args).unwrap());
+    println!("running command {:?}", cmd);
     let output = cmd.output()?;
     Ok(CompilerOutput {
         success: output.status.success(),
@@ -44,12 +45,30 @@ fn snapshots() -> Result<()> {
             None => "",
         };
 
-        let output = compile(path, args)?;
-        let name = path.file_name().unwrap().to_str().unwrap();
+        // Compile without optimizations first...
+        let output = compile(path, &("".to_string() + args))?;
+        let name = path.file_name().unwrap().to_str().unwrap().to_string() + "";
         let snapshot_path = path.parent().unwrap();
         insta::with_settings!({
           snapshot_path => snapshot_path,
           prepend_module_to_snapshot => false,
+          filters => vec![
+            (r"thread 'main' \((.*?)\)", r"thread 'main' ([some PID])")
+          ],
+        }, {
+          insta::assert_toml_snapshot!(name, output);
+        });
+
+        // Compile with optimizations too to ensure they don't affect program behavior.
+        let output = compile(path, &(" -O1".to_string() + args))?;
+        let name = path.file_name().unwrap().to_str().unwrap().to_string() + ".opt";
+        let snapshot_path = path.parent().unwrap();
+        insta::with_settings!({
+          snapshot_path => snapshot_path,
+          prepend_module_to_snapshot => false,
+          filters => vec![
+            (r"thread 'main' \((.*?)\)", r"thread 'main' ([some PID])")
+          ],
         }, {
           insta::assert_toml_snapshot!(name, output);
         });

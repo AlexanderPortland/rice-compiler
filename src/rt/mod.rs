@@ -45,7 +45,7 @@ use wasmtime::{
 
 use self::{codegen::Import, conversions::Wasmable};
 use crate::{
-    bc::types as bc,
+    bc::types::{self as bc, AllocLoc},
     stdlib::stdlib,
     tir::{Tcx, types::ImplRef},
     utils::{Symbol, sym},
@@ -448,9 +448,9 @@ impl Runtime {
         }
         .expect("conversion to usize should work...");
 
-        log::debug!("array val is {val:?} w/ count {count:?}");
+        // log::debug!("array val is {val:?} w/ count {count:?}");
 
-        ArrayRef::new(store, allocator, &val, len).map(|array_ref| Val::from(array_ref))
+        ArrayRef::new(store, allocator, &val, len).map(Val::from)
     }
 
     fn alloc_array_vals(
@@ -555,6 +555,7 @@ impl WasmFunc for bc::Function {
             locals,
             pc: bc::Location::START,
             store: caller.as_context_mut(),
+            stack_allocs: Default::default(),
             ret_val: OnceCell::new(),
         };
         frame.eval()
@@ -569,11 +570,74 @@ impl WasmFunc for bc::Function {
     }
 }
 
+enum StackAlloc {
+    Tuple(Vec<Val>),
+    Array(Vec<Val>),
+}
+
+#[derive(Default)]
+pub struct StackAllocs {
+    data: HashMap<i32, StackAlloc>,
+    next_alloc: i32,
+}
+
+impl StackAllocs {
+    fn new_alloc(&mut self, alloc: StackAlloc) -> i32 {
+        let alloc_at = self.next_alloc;
+        let res = self.data.insert(alloc_at, alloc);
+        assert!(res.is_none(), "shouldn't already have a value here...");
+        self.next_alloc += 1;
+        alloc_at
+    }
+
+    fn index_alloc(&self, alloc_no: i32, index: u32) -> Option<Result<&Val>> {
+        // println!("trying to access index {index:?} of alloc {alloc_no:?}");
+        let res = match self.data.get(&alloc_no)? {
+            StackAlloc::Array(arr) => arr.get(index as usize).with_context(|| {
+                format!(
+                    "index out of bounds: the length is {:?} but the index is {index:?}",
+                    arr.len()
+                )
+            }),
+            StackAlloc::Tuple(tup) => tup.get(index as usize).with_context(|| {
+                format!(
+                    "index out of bounds: the length is {:?} but the index is {index:?}",
+                    tup.len()
+                )
+            }),
+        };
+        Some(res)
+    }
+
+    fn index_array_mut(&mut self, alloc_no: i32, index: u32) -> Option<Result<&mut Val>> {
+        let res = match self.data.get_mut(&alloc_no)? {
+            StackAlloc::Array(arr) => {
+                let len = arr.len();
+                arr.get_mut(index as usize).with_context(|| {
+                    format!(
+                        "index out of bounds: the length is {len:?} but the index is {index:?}",
+                    )
+                })
+            }
+            StackAlloc::Tuple(tup) => {
+                let len = tup.len();
+                tup.get_mut(index as usize).with_context(|| {
+                    format!(
+                        "index out of bounds: the length is {len:?} but the index is {index:?}",
+                    )
+                })
+            }
+        };
+        Some(res)
+    }
+}
+
 /// A stack frame for an executing function.
 struct Frame<'a> {
     function: &'a bc::Function,
     rt: &'a Runtime,
     locals: IndexMap<bc::Local, Val>,
+    stack_allocs: StackAllocs,
     pc: bc::Location,
     store: StoreContextMut<'a, ()>,
     ret_val: OnceCell<Val>,
@@ -584,6 +648,9 @@ struct Frame<'a> {
 enum MemPlace {
     /// A local in the current stack frame.
     Local(bc::LocalIdx),
+
+    /// An element of a heap-allocated array.
+    StackAlloc(i32, u32),
 
     /// An element of a heap-allocated array.
     ArrayIndex(Rooted<ArrayRef>, u32),
@@ -641,6 +708,11 @@ impl Frame<'_> {
                 .locals
                 .get(local)
                 .with_context(|| format!("ICE: missing local: {local}"))?),
+            MemPlace::StackAlloc(array, index) => self
+                .stack_allocs
+                .index_alloc(array, index)
+                .with_context(|| format!("ICE: missing stack alloc {array}"))?
+                .copied(),
             MemPlace::StructField(struct_ref, i) => struct_ref.field(store!(self), i),
             MemPlace::ArrayIndex(array_ref, i) => array_ref.get(store!(self), i),
         }
@@ -648,7 +720,7 @@ impl Frame<'_> {
 
     fn struct_ref(&mut self, val: Val) -> Result<Rooted<StructRef>> {
         val.any_ref()
-            .context("ICE: not an anyref")?
+            .context("ICE: not an anyref1")?
             .context("ICE: null anyref")?
             .as_struct(store!(self))?
             .context("ICE: not a structref")
@@ -657,7 +729,7 @@ impl Frame<'_> {
     fn array_ref(&mut self, val: Val) -> Result<Rooted<ArrayRef>> {
         log::debug!("val is {val:?}");
         val.any_ref()
-            .context("ICE: not an anyref")?
+            .context("ICE: not an anyref2")?
             .context("ICE: null anyref")?
             .as_array(store!(self))?
             .context("ICE: not an arrayref")
@@ -696,16 +768,26 @@ impl Frame<'_> {
             let val = self.eval_mem_place(mem_place)?;
             mem_place = match elem {
                 bc::ProjectionElem::Field { index, .. } => {
-                    let struct_ref = self.struct_ref(val)?;
-                    MemPlace::StructField(struct_ref, *index)
+                    if let Ok(struct_ref) = self.struct_ref(val) {
+                        MemPlace::StructField(struct_ref, *index)
+                    } else if let Some(stack_alloc) = val.i32() {
+                        MemPlace::StackAlloc(
+                            stack_alloc,
+                            u32::try_from(*index).expect("should convert"),
+                        )
+                    } else {
+                        panic!("eeee");
+                    }
                 }
                 bc::ProjectionElem::Index { index, .. } => {
-                    log::debug!("trying to get indexing for index {index:?}");
-                    let array_ref = self.array_ref(val)?;
-
-                    let res = MemPlace::ArrayIndex(array_ref, self.index_from_operand(index)?);
-                    log::debug!("all good!!");
-                    res
+                    // log::debug!("trying to get indexing for index {index:?}");
+                    if let Ok(array_ref) = self.array_ref(val) {
+                        MemPlace::ArrayIndex(array_ref, self.index_from_operand(index)?)
+                    } else if let Some(stack_array) = val.i32() {
+                        MemPlace::StackAlloc(stack_array, self.index_from_operand(index)?)
+                    } else {
+                        panic!("afhhhh");
+                    }
                 }
             }
         }
@@ -723,6 +805,13 @@ impl Frame<'_> {
             }
             MemPlace::ArrayIndex(array_ref, index) => {
                 array_ref.set(store!(self), index, value)?;
+            }
+            MemPlace::StackAlloc(array, index) => {
+                let val_ref = self
+                    .stack_allocs
+                    .index_array_mut(array, index)
+                    .with_context(|| "ICE: invalid shit".to_string())??;
+                *val_ref = value;
             }
         }
         Ok(())
@@ -837,41 +926,53 @@ impl Frame<'_> {
                 self.rt.alloc_tuple(store!(self), vec![func, env])?
             }
 
-            bc::Rvalue::Alloc {
-                kind,
-                args,
-                loc: _loc,
-            } => {
-                log::debug!("eval rvalue alloc kind {kind:?}, args {args:?}");
+            bc::Rvalue::Alloc { kind, args, loc } => match args {
+                bc::AllocArgs::Lit(ops) => {
+                    let fields = ops
+                        .iter()
+                        .map(|el| self.eval_operand(el))
+                        .collect::<Result<Vec<_>>>()?;
 
-                match args {
-                    bc::AllocArgs::Lit(ops) => {
-                        let fields = ops
-                            .iter()
-                            .map(|el| self.eval_operand(el))
-                            .collect::<Result<Vec<_>>>()?;
-
-                        match kind {
-                            bc::AllocKind::Tuple | bc::AllocKind::Struct => {
-                                self.rt.alloc_tuple(store!(self), fields)?
-                            }
-                            bc::AllocKind::Array => {
-                                self.rt.alloc_array_vals(store!(self), fields)?
-                            }
+                    match (kind, loc) {
+                        (bc::AllocKind::Tuple, bc::AllocLoc::Heap)
+                        | (bc::AllocKind::Struct, bc::AllocLoc::Heap) => {
+                            self.rt.alloc_tuple(store!(self), fields)?
+                        }
+                        (bc::AllocKind::Array, bc::AllocLoc::Heap) => {
+                            self.rt.alloc_array_vals(store!(self), fields)?
+                        }
+                        (bc::AllocKind::Tuple, bc::AllocLoc::Stack) => {
+                            self.stack_alloc_tuple(fields)?
+                        }
+                        (bc::AllocKind::Array, bc::AllocLoc::Stack) => {
+                            self.stack_alloc_array(fields)?
+                        }
+                        (bc::AllocKind::Struct, bc::AllocLoc::Stack) => {
+                            self.stack_alloc_tuple(fields)?
                         }
                     }
-                    bc::AllocArgs::Repeated { op, count } => {
-                        let bc::AllocKind::Array = *kind else {
-                            panic!("should only ever construct repeated allocations for arrays...");
-                        };
+                }
+                bc::AllocArgs::Repeated { op, count } => {
+                    // if *loc == AllocLoc::Stack {
+                    //     todo!();
+                    // }
+                    let bc::AllocKind::Array = *kind else {
+                        panic!("should only ever construct repeated allocations for arrays...");
+                    };
 
-                        let res = self.eval_operand(op)?;
-                        let count = self.eval_operand(count)?;
+                    let res = self.eval_operand(op)?;
+                    let count = self.eval_operand(count)?;
 
-                        self.rt.alloc_array_copy(store!(self), res, count)?
+                    match loc {
+                        AllocLoc::Stack => self.stack_alloc_array(vec![
+                            res;
+                            count.i32().expect("shoudl work i think...")
+                                as usize
+                        ])?,
+                        AllocLoc::Heap => self.rt.alloc_array_copy(store!(self), res, count)?,
                     }
                 }
-            }
+            },
 
             bc::Rvalue::Call { f, args, .. } => {
                 let f_val = self.eval_operand(f)?;
@@ -920,6 +1021,18 @@ impl Frame<'_> {
                     .call(store!(self).as_context_mut(), &method_ref, &arg_vals)?
             }
         })
+    }
+
+    fn stack_alloc_tuple(&mut self, fields: Vec<Val>) -> Result<Val> {
+        Ok(Val::I32(
+            self.stack_allocs.new_alloc(StackAlloc::Tuple(fields)),
+        ))
+    }
+
+    fn stack_alloc_array(&mut self, elements: Vec<Val>) -> Result<Val> {
+        Ok(Val::I32(
+            self.stack_allocs.new_alloc(StackAlloc::Array(elements)),
+        ))
     }
 
     fn eval(&mut self) -> Result<Val> {

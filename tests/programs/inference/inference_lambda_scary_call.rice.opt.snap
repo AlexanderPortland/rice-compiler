@@ -1,0 +1,10 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × type inference ambiguity for type Type(Int)
+
+'''

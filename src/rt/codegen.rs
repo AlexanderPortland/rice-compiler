@@ -573,8 +573,8 @@ impl CodegenFunc<'_, '_> {
                     }
 
                     match loc {
-                        bc::AllocLoc::Stack => unimplemented!(),
-                        bc::AllocLoc::Heap => match kind {
+                        // Handle heap the same as stack for wasm codegen...
+                        bc::AllocLoc::Stack | bc::AllocLoc::Heap => match kind {
                             bc::AllocKind::Tuple => {
                                 let ty_idx = self.module.tuple_ty_idx(ty);
                                 instrs.struct_new(ty_idx);
@@ -598,8 +598,8 @@ impl CodegenFunc<'_, '_> {
                     self.gen_operand(op, instrs);
                     self.gen_operand(count, instrs);
                     match loc {
-                        bc::AllocLoc::Stack => unimplemented!(),
-                        bc::AllocLoc::Heap => match kind {
+                        // Handle heap the same as stack for codegen for now..
+                        bc::AllocLoc::Stack | bc::AllocLoc::Heap => match kind {
                             bc::AllocKind::Array => {
                                 let ty_idx = self.module.array_ty_idx(ty);
                                 instrs.array_new(ty_idx);

@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × empty array literal
+   ╭─[array_decl_lit_empty.rice:2:18]
+ 1 │ fn main() {
+ 2 │   let x: [int] = [] in
+   ·                  ──
+ 3 │   ()
+   ╰────
+
+'''

@@ -1,0 +1,6 @@
+fn main() {
+  // store the zero in a tuple so we don't try to const prop it
+  let x = (0, 1) in
+  let y = (10 / x.0) in
+  println("unrelated")
+}
