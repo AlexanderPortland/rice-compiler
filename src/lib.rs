@@ -3,7 +3,6 @@
     clippy::new_without_default,
     rustdoc::private_intra_doc_links
 )]
-#![feature(assert_matches)]
 
 use lalrpop_util::lalrpop_mod;
 

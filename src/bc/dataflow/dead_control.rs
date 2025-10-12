@@ -1,5 +1,4 @@
 use std::{
-    assert_matches::assert_matches,
     collections::{HashMap, HashSet},
     sync::Arc,
 };
@@ -245,7 +244,12 @@ fn mergeable_blocks(func: &Function) -> HashMap<BasicBlockIdx, BasicBlockIdx> {
         };
 
         let to: BasicBlockIdx = outgoing.target().into();
-        assert_matches!(data.terminator.kind(), TerminatorKind::Jump(jmp_to) if *jmp_to == to);
+        match data.terminator.kind() {
+            TerminatorKind::Jump(jmp_to) if *jmp_to == to => (),
+            _ => panic!(
+                "if we only have one outgoing edge, our terminator should just be a jump there, anything else is malformed"
+            ),
+        }
 
         // And we're the only block that points to them
         let [coming_back] = &*func
