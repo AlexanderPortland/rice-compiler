@@ -1,0 +1,7 @@
+fn foo(x: int, y: int) {
+    println(int_to_string(y))
+}
+
+fn main() {
+  foo(10, 11)
+}

@@ -321,6 +321,14 @@ impl LocalVisitor {
 }
 
 impl Visit for LocalVisitor {
+    fn visit_function(&mut self, func: &Function) {
+        for (param, _) in func.params() {
+            self.0.insert(param);
+        }
+
+        self.super_visit_function(func);
+    }
+
     fn visit_lvalue(&mut self, _place: &crate::bc::types::Place, _loc: Location) {
         self.0.insert(_place.local);
     }
