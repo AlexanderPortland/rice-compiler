@@ -1,22 +1,27 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fmt, sync::Arc};
 
 use indexical::{ArcIndexSet, ArcIndexVec, IndexedDomain, set::IndexSet};
+use internment::Intern;
+use serde::Serialize;
 
-use crate::bc::{
-    types::{
-        AllocArgs, AllocKind, Function, Local, LocalIdx, Location, Operand, Place, ProjectionElem,
-        Rvalue, Type,
+use crate::{
+    bc::{
+        types::{
+            AllocArgs, AllocKind, Function, Local, LocalIdx, Location, Operand, Place,
+            ProjectionElem, Rvalue, Type,
+        },
+        visit::Visit,
     },
-    visit::Visit,
+    interned,
 };
 
-/// A location in memeory.
+/// A location in memory.
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub enum MemLoc {
-    // TODO: should be a local instead
-    /// A normal value stored in a place (on the stack).
+    /// A normal value stored in a [Local] (on the stack).
     Local(LocalIdx),
-    /// A tuple value within an allocation (that may be on the heap).
+    /// A tuple value within an [Allocation]. It's conceptually on the heap despite that
+    /// optimizations might decide to actually allocate it on the stack instead.
     Allocated(Allocation, AllocProj),
 }
 
@@ -29,7 +34,7 @@ impl std::fmt::Display for MemLoc {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Serialize, PartialOrd, Ord)]
 pub enum AllocProj {
     Index,
     Field(usize),
@@ -38,9 +43,8 @@ pub enum AllocProj {
 /// An allocation, identified by the location at which it was allocated.
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum Allocation {
-    /// An abstract allocation that we know exists somewhere,
-    /// but was not allocated in the given function.
-    Abstract(usize),
+    /// An allocation passed into the function as an argument.
+    FromArg(PtrPlace),
     /// A 'real' allocation made within the current function at a given location.
     Real(Location),
 }
@@ -50,22 +54,54 @@ indexical::define_index_type! {
 }
 
 impl Allocation {
-    pub fn new_imaginary(existing: &mut Vec<Allocation>) -> Self {
-        let new = Allocation::Abstract(existing.len());
-        existing.push(new);
-        new
+    pub fn from_arg(arg_p: impl Into<PtrPlace>) -> Self {
+        Self::FromArg(arg_p.into())
     }
 
     pub fn from_loc(loc: Location) -> Self {
         Self::Real(loc)
     }
 
-    pub fn with_index_proj(&self, proj: &ProjectionElem) -> MemLoc {
-        let proj = match proj {
-            ProjectionElem::Field { index, .. } => AllocProj::Field(*index),
-            ProjectionElem::Index { .. } => AllocProj::Index,
-        };
+    pub fn with_index_proj(&self, proj: &AllocProj) -> MemLoc {
+        MemLoc::Allocated(*self, *proj)
+    }
+}
 
-        MemLoc::Allocated(*self, proj)
+/// A simplified version of places that ensure all indexes are identical and
+/// projection types don't matter
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Serialize, PartialOrd, Ord)]
+pub struct PtrPlaceData {
+    pub local: LocalIdx,
+    pub projection: Vec<AllocProj>,
+}
+
+interned!(PtrPlace, PtrPlaceData);
+
+impl From<Place> for PtrPlace {
+    fn from(value: Place) -> Self {
+        PtrPlace(Intern::new(PtrPlaceData {
+            local: value.local,
+            projection: value
+                .projection
+                .iter()
+                .map(|proj_el| match proj_el {
+                    ProjectionElem::Field { index, ty } => AllocProj::Field(*index),
+                    ProjectionElem::Index { index, ty } => AllocProj::Index,
+                })
+                .collect(),
+        }))
+    }
+}
+
+impl fmt::Display for PtrPlace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.local)?;
+        for proj in &self.projection {
+            match proj {
+                AllocProj::Field(index) => write!(f, ".{}", index)?,
+                AllocProj::Index => write!(f, "[?]")?,
+            }
+        }
+        Ok(())
     }
 }
