@@ -91,6 +91,7 @@ fn exec(args: &Args, tcx: Tcx, bc: bc::Program) -> Result<()> {
         rt.register(bc)?;
         let main_func = rt.function(Symbol::main())?;
         rt.call_toplevel(&main_func, vec![])?;
+        log::debug!("RT:\n{}", rt.stats_string());
         Ok(())
     }
     exec(args, tcx, bc).map_err(|e| miette!("{e:?}"))

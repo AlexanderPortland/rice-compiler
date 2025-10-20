@@ -5,3 +5,13 @@ expression: output
 success = true
 stdout = ''
 stderr = ''
+
+[stats]
+bc_stmts = 10
+bc_locals = 12
+bc_blocks = 3
+exec_calls = 1
+exec_steps = 2
+
+[stats.allocs]
+Heap = 2

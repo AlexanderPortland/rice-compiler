@@ -29,7 +29,9 @@ use std::{
     collections::{HashMap, hash_map::Entry},
     ops::{Add, Deref, Div, Mul, Sub},
     string::String as StdString,
-    sync::{Arc, LazyLock, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{
+        Arc, LazyLock, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard, atomic::AtomicUsize,
+    },
 };
 
 use anyhow::{Context, Result, bail};
@@ -75,6 +77,10 @@ pub struct RuntimeInner {
     struct_allocators: RwLock<HashMap<Vec<ValTypeEq>, StructRefPre>>,
     // One allocator for each kind of array type (each possible inner types)
     array_allocators: RwLock<HashMap<ValTypeEq, ArrayRefPre>>,
+
+    // Runtime stats
+    step_count: AtomicUsize,
+    fn_call_count: AtomicUsize,
 
     // Rice runtime data
     functions: RwLock<HashMap<Symbol, FuncDesc>>,
@@ -201,6 +207,8 @@ impl Runtime {
             engine,
             tcx,
             opts,
+            step_count: Default::default(),
+            fn_call_count: Default::default(),
             linker: RwLock::new(linker),
             store: RwLock::new(store),
             struct_allocators: RwLock::new(HashMap::new()),
@@ -219,6 +227,16 @@ impl Runtime {
         }
 
         Ok(rt)
+    }
+
+    pub fn stats_string(&self) -> String {
+        format!(
+            "calls: {}, steps: {}",
+            self.0
+                .fn_call_count
+                .load(std::sync::atomic::Ordering::Relaxed),
+            self.0.step_count.load(std::sync::atomic::Ordering::Relaxed)
+        )
     }
 
     // Array of helper functions for getting read or write access to runtime data structures.
@@ -280,6 +298,9 @@ impl Runtime {
 
     fn call(&self, store: StoreContextMut<'_, ()>, func: &Func, args: &[Val]) -> Result<Val> {
         let mut results = Some(Val::null_any_ref());
+        self.0
+            .fn_call_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         func.call(store, args, results.as_mut_slice())?;
 
         if let Some(panic) = &*self.panic() {
@@ -448,8 +469,6 @@ impl Runtime {
         }
         .expect("conversion to usize should work...");
 
-        // log::debug!("array val is {val:?} w/ count {count:?}");
-
         ArrayRef::new(store, allocator, &val, len).map(Val::from)
     }
 
@@ -478,8 +497,6 @@ impl Runtime {
         let allocator = allocators
             .entry(val_type)
             .or_insert_with_key(make_allocator);
-
-        log::debug!("array vals are {vals:?}");
 
         ArrayRef::new_fixed(store, allocator, &vals).map(Val::from)
     }
@@ -662,6 +679,11 @@ enum MemPlace {
 impl Frame<'_> {
     /// Executes a single instruction, returning true if there is more work to do in this frame.
     fn step(&mut self) -> Result<bool> {
+        self.rt
+            .0
+            .step_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         // Locate the instruction at the program counter
         let block = self.function.body.data(self.pc.block);
         let instr = block.get(self.pc.instr);
@@ -727,7 +749,6 @@ impl Frame<'_> {
     }
 
     fn array_ref(&mut self, val: Val) -> Result<Rooted<ArrayRef>> {
-        log::debug!("val is {val:?}");
         val.any_ref()
             .context("ICE: not an anyref2")?
             .context("ICE: null anyref")?

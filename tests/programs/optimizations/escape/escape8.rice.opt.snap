@@ -7,3 +7,14 @@ stdout = '''
 9
 '''
 stderr = ''
+
+[stats]
+bc_stmts = 15
+bc_locals = 14
+bc_blocks = 2
+exec_calls = 4
+exec_steps = 15
+
+[stats.allocs]
+Stack = 4
+Heap = 2

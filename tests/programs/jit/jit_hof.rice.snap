@@ -10,3 +10,10 @@ stdout = '''
 89
 '''
 stderr = ''
+
+[stats]
+bc_stmts = 38
+bc_locals = 56
+bc_blocks = 5
+exec_calls = 15
+exec_steps = 38

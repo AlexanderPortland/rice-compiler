@@ -121,7 +121,6 @@ impl TypeKind {
 
     /// Tests types for alpha-equivalence.
     pub fn equiv(&self, other: &TypeKind) -> bool {
-        log::debug!("equiv on {self}, {other}");
         match (self, other) {
             (TypeKind::Int, TypeKind::Int)
             | (TypeKind::Float, TypeKind::Float)

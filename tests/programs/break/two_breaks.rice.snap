@@ -7,3 +7,13 @@ stdout = '''
 world
 '''
 stderr = ''
+
+[stats]
+bc_stmts = 19
+bc_locals = 17
+bc_blocks = 9
+exec_calls = 2
+exec_steps = 9
+
+[stats.allocs]
+Heap = 3

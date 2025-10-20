@@ -409,10 +409,18 @@ pub enum AllocKind {
 }
 
 /// The location in memory of an object allocated by an [`Rvalue::Alloc`] instruction.
-#[derive(Debug, Clone, Copy, Display, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Display, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+// #[serde(rename_all = "lowercase")]
+#[serde(into = "String")]
 pub enum AllocLoc {
     Stack,
     Heap,
+}
+
+impl From<AllocLoc> for String {
+    fn from(value: AllocLoc) -> Self {
+        format!("{value}")
+    }
 }
 
 /// The inputs to an allocation by an [`Rvalue::Alloc`] instruction.

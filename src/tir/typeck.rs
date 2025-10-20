@@ -938,7 +938,6 @@ impl Tcx {
                 let src = self.check_expr(src)?;
                 let dst = self.check_expr(dst)?;
 
-                log::debug!("have assign w/ src {src} and dest {dst}");
                 self.ty_equiv(src.ty, dst.ty, dst.span)?;
 
                 (

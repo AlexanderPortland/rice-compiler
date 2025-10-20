@@ -403,7 +403,6 @@ impl<'a> LowerBody<'a> {
             }
 
             tir::ExprKind::Array(els) => {
-                log::debug!("array w/ els {els:?}");
                 let els = els
                     .iter()
                     .map(|el| self.lower_expr_into_tmp(el))
@@ -456,11 +455,9 @@ impl<'a> LowerBody<'a> {
 
             tir::ExprKind::Index { e, i } => {
                 let place = self.gensym(e.ty);
-                log::debug!("new place is {place}");
                 self.lower_expr_into(e, WriteDst::Place(place));
 
                 let tmp = self.lower_expr_into_tmp(i);
-                log::debug!("tmp is {place}");
                 let projected = place.extend_projection(
                     [ProjectionElem::Index {
                         index: tmp,
@@ -546,7 +543,6 @@ impl<'a> LowerBody<'a> {
     }
 
     fn lower_place_impl(&mut self, e: &tir::Expr, proj: &mut Vec<bc::ProjectionElem>) -> LocalIdx {
-        log::debug!("lowering place {e:?} w/ proj {proj:?}");
         match &e.kind {
             tir::ExprKind::Var(name) => self.get_local(*name, e.ty),
             tir::ExprKind::Project { e, i } => {

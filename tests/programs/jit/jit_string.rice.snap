@@ -7,3 +7,10 @@ stdout = '''
 ab0
 '''
 stderr = ''
+
+[stats]
+bc_stmts = 10
+bc_locals = 13
+bc_blocks = 2
+exec_calls = 1
+exec_steps = 0
