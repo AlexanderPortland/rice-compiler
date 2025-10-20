@@ -53,13 +53,12 @@ impl VisitMut for StackAllocate {
 
 fn escapes(func: &Function, analysis: PointerAnalysis) -> StackAllocate {
     let mut escaping_allocations = ArcIndexSet::new(analysis.alloc_domain());
-    let mut places = EscapingPlaces::default();
-    places.visit_function(func);
+    let mut places = EscapingPlaces::for_function(func);
 
     // For all places that might escape...
     for escaping in places.into_iter() {
         // And all of the memory locations they could alias..
-        for mem_loc in analysis.could_refer_to(escaping) {
+        for mem_loc in analysis.could_refer_to(&escaping) {
             // The allocations those memory locations could point to may escape.
             if let Some(allocations) = analysis.points_to().get(&mem_loc) {
                 escaping_allocations.union(allocations);
@@ -92,12 +91,26 @@ fn escapes(func: &Function, analysis: PointerAnalysis) -> StackAllocate {
 
 #[derive(Default, Debug)]
 pub struct EscapingPlaces {
-    returned: Vec<Place>,
-    passed_to_callees: Vec<Place>,
-    caller_args: Vec<Place>,
+    returned: HashSet<Place>,
+    passed_to_callees: HashSet<Place>,
+    num_params: usize,
+    caller_args: HashSet<Place>,
 }
 
 impl EscapingPlaces {
+    fn new(num_params: usize) -> Self {
+        Self {
+            num_params,
+            ..Default::default()
+        }
+    }
+
+    fn for_function(func: &Function) -> Self {
+        let mut escape = Self::new(func.num_params);
+        escape.visit_function(func);
+        escape
+    }
+
     fn into_iter(self) -> impl Iterator<Item = Place> {
         self.returned
             .into_iter()
@@ -107,26 +120,12 @@ impl EscapingPlaces {
 }
 
 impl Visit for EscapingPlaces {
-    fn visit_function(&mut self, func: &Function) {
-        // All params can escape if you write into their allocations.
-        // We skip one because x0 is the environment.
-        for param_no in 1..func.num_params {
-            self.caller_args.push(Place::new(
-                LocalIdx::from_usize(param_no),
-                vec![],
-                Type::bool(),
-            ))
-        }
-
-        self.super_visit_function(func);
-    }
-
     fn visit_rvalue(&mut self, rvalue: &Rvalue, loc: Location) {
         // Arguments to function & method calls escape.
         if let Rvalue::Call { args, .. } | Rvalue::MethodCall { args, .. } = rvalue {
             for arg in args {
                 if let Operand::Place(place) = arg {
-                    self.passed_to_callees.push(*place);
+                    self.passed_to_callees.insert(*place);
                 }
             }
         }
@@ -134,10 +133,17 @@ impl Visit for EscapingPlaces {
         self.super_visit_rvalue(rvalue, loc);
     }
 
+    fn visit_lvalue(&mut self, place: &Place, _loc: Location) {
+        /// Assigns to params escape...
+        if place.local < self.num_params {
+            self.passed_to_callees.insert(*place);
+        }
+    }
+
     fn visit_terminator(&mut self, term: &crate::bc::types::Terminator, loc: Location) {
         // Returned places escape.
         if let TerminatorKind::Return(Operand::Place(place)) = term.kind() {
-            self.returned.push(*place);
+            self.returned.insert(*place);
         }
         self.super_visit_terminator(term, loc);
     }

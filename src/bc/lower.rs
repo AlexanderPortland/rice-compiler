@@ -208,10 +208,7 @@ impl<'a> LowerBody<'a> {
             statements,
             terminator,
         };
-        log::debug!(
-            "just finished basic block {:?} -- {cur_block}",
-            self.cur_loc
-        );
+
         match cur_block.terminator.kind() {
             bc::TerminatorKind::Jump(dst) => {
                 self.graph.add_edge(self.cur_loc.into(), (*dst).into(), ());
