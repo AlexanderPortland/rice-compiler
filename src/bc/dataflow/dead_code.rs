@@ -1,6 +1,6 @@
 use crate::bc::{
     dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
-    types::{Binop, Function, Local, Location, Operand, Rvalue, Statement},
+    types::{AllocArgs, AllocKind, Binop, Function, Local, Location, Operand, Rvalue, Statement},
     visit::{Visit, VisitMut},
 };
 use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
@@ -118,9 +118,16 @@ impl<'z> DeadCodeElimination<'z> {
     ///
     /// Currently checks for any function or method calls, and any array indexing that could fail at runtime.
     fn has_effect(num_params: usize, stmt: &Statement, loc: Location) -> bool {
-        // println!("does {stmt} have effects?");
-
-        if matches!(stmt.rvalue, Rvalue::MethodCall { .. } | Rvalue::Call { .. }) {
+        // All calls and copy arrays can have side effects. (Copy arrays can be 0).
+        if matches!(
+            stmt.rvalue,
+            Rvalue::MethodCall { .. }
+                | Rvalue::Call { .. }
+                | Rvalue::Alloc {
+                    args: AllocArgs::Repeated { .. },
+                    ..
+                }
+        ) {
             return true;
         }
 

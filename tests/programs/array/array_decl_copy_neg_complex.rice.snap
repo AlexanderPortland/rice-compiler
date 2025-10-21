@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × array copy count must be non-negative, -5 is not
+  │ 
+  │ Caused by:
+  │     out of range integral type conversion attempted
+
+'''

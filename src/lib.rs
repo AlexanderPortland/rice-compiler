@@ -4,6 +4,7 @@
     clippy::write_with_newline,
     clippy::new_without_default,
     clippy::missing_errors_doc,
+    clippy::unnecessary_wraps,
     rustdoc::private_intra_doc_links
 )]
 
@@ -12,6 +13,7 @@ use lalrpop_util::lalrpop_mod;
 pub mod ast;
 pub mod bc;
 pub mod rt;
+#[allow(clippy::all, clippy::pedantic)]
 pub mod stdlib;
 pub mod tir;
 pub mod utils;

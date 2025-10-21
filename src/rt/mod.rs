@@ -462,13 +462,16 @@ impl Runtime {
             .or_insert_with_key(make_allocator);
 
         let len: u32 = match count {
-            Val::I32(val_i32) => u32::try_from(val_i32),
-            Val::I64(val_i64) => u32::try_from(val_i64),
+            Val::I32(val_i32) => u32::try_from(val_i32).with_context(|| {
+                format!("array copy count must be non-negative, {val_i32} is not")
+            }),
+            Val::I64(val_i64) => u32::try_from(val_i64).with_context(|| {
+                format!("array copy count must be non-negative, {val_i64} is not")
+            }),
             _other => {
                 panic!("not sure how to get val from here... bc count is {count:?}")
             }
-        }
-        .expect("conversion to usize should work...");
+        }?;
 
         ArrayRef::new(store, allocator, &val, len).map(Val::from)
     }
@@ -980,9 +983,6 @@ impl Frame<'_> {
                     }
                 }
                 bc::AllocArgs::Repeated { op, count } => {
-                    // if *loc == AllocLoc::Stack {
-                    //     todo!();
-                    // }
                     let bc::AllocKind::Array = *kind else {
                         panic!("should only ever construct repeated allocations for arrays...");
                     };
@@ -993,8 +993,12 @@ impl Frame<'_> {
                     match loc {
                         AllocLoc::Stack => self.stack_alloc_array(vec![
                             res;
-                            count.i32().expect("shoudl work i think...")
-                                as usize
+                            {
+                                let count: i32 = count.i32().expect("shoudl work i think...");
+                                count.try_into().with_context(|| {
+                                    format!("array copy count must be non-negative, {count} is not")
+                                })?
+                            }
                         ])?,
                         AllocLoc::Heap => self.rt.alloc_array_copy(store!(self), res, count)?,
                     }

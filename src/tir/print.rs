@@ -58,7 +58,7 @@ impl fmt::Display for ExprKind {
         match self {
             ExprKind::Var(s) => write!(f, "{s}"),
             ExprKind::Const(c) => write!(f, "{c}"),
-            ExprKind::Tuple(es) => {
+            ExprKind::Tuple(es) | ExprKind::Struct(es) => {
                 write!(f, "(")?;
                 write_comma_separated(f, es)?;
                 write!(f, ")")
@@ -70,11 +70,6 @@ impl fmt::Display for ExprKind {
             }
             ExprKind::ArrayCopy { val, count } => {
                 write!(f, "[|{val}x{count}|]")
-            }
-            ExprKind::Struct(es) => {
-                write!(f, "(")?;
-                write_comma_separated(f, es)?;
-                write!(f, ")")
             }
             ExprKind::Project { e, i } => write!(f, "{e}.{i}"),
             ExprKind::Index { e, i } => write!(f, "{e}[{i}]"),
