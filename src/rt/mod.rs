@@ -101,7 +101,7 @@ impl Deref for Runtime {
     }
 }
 
-/// Workaround so we can use a ValType as a key in a hash map.
+/// Workaround so we can use a `ValType` as a key in a hash map.
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Clone, Hash)]
 struct ValTypeEq(ValType);
@@ -207,8 +207,8 @@ impl Runtime {
             engine,
             tcx,
             opts,
-            step_count: Default::default(),
-            fn_call_count: Default::default(),
+            step_count: AtomicUsize::default(),
+            fn_call_count: AtomicUsize::default(),
             linker: RwLock::new(linker),
             store: RwLock::new(store),
             struct_allocators: RwLock::new(HashMap::new()),
@@ -219,7 +219,7 @@ impl Runtime {
             unit: OnceLock::new(),
         }));
 
-        let unit = rt.alloc_tuple(&mut *rt.store.try_write().unwrap(), vec![])?;
+        let unit = rt.alloc_tuple(&mut *rt.store.try_write().unwrap(), &[])?;
         rt.unit.set(unit).unwrap();
 
         for (name, f) in stdlib() {
@@ -229,6 +229,7 @@ impl Runtime {
         Ok(rt)
     }
 
+    #[must_use]
     pub fn stats_string(&self) -> String {
         format!(
             "calls: {}, steps: {}",
@@ -327,9 +328,6 @@ impl Runtime {
     }
 
     fn register_function<F: WasmFunc>(&self, name: Symbol, func: F) -> Result<()> {
-        let mut linker = self.linker_mut();
-        let rt_handle = self.clone();
-
         fn translate_ty(ty: bc::Type) -> ValType {
             match ty.kind() {
                 bc::TypeKind::Bool | bc::TypeKind::Int => ValType::I32,
@@ -343,6 +341,9 @@ impl Runtime {
                 bc::TypeKind::Hole(_) | bc::TypeKind::Self_ => unreachable!(),
             }
         }
+
+        let mut linker = self.linker_mut();
+        let rt_handle = self.clone();
 
         let bc::TypeKind::Func { inputs, output } = func.rt_type().kind() else {
             unreachable!()
@@ -415,16 +416,16 @@ impl Runtime {
         Ok(())
     }
 
-    fn get_abstract_ty(&self, store: StoreContext<'_, ()>, value: Val) -> ValType {
+    fn get_abstract_ty(store: &StoreContext<'_, ()>, value: &Val) -> ValType {
         match value {
             Val::I32(_) => ValType::I32,
             Val::F32(_) => ValType::F32,
             Val::FuncRef(_) => REFFUNC.clone(),
             Val::AnyRef(any_ref) => {
                 let any_ref = any_ref.expect("any_ref is null");
-                if any_ref.is_struct(&store).expect("reference unrooted") {
+                if any_ref.is_struct(store).expect("reference unrooted") {
                     REFSTRUCT.clone()
-                } else if any_ref.is_array(&store).expect("reference unrooted") {
+                } else if any_ref.is_array(store).expect("reference unrooted") {
                     REFARRAY.clone()
                 } else {
                     unreachable!()
@@ -445,7 +446,7 @@ impl Runtime {
         val: Val,
         count: Val,
     ) -> Result<Val> {
-        let val_type: ValTypeEq = ValTypeEq(self.get_abstract_ty(store.as_context(), val));
+        let val_type: ValTypeEq = ValTypeEq(Self::get_abstract_ty(&store.as_context(), &val));
         let make_allocator = |val_type: &ValTypeEq| {
             let array_ty = wasmtime::ArrayType::new(
                 &self.engine,
@@ -461,13 +462,16 @@ impl Runtime {
             .or_insert_with_key(make_allocator);
 
         let len: u32 = match count {
-            Val::I32(val_i32) => u32::try_from(val_i32),
-            Val::I64(val_i64) => u32::try_from(val_i64),
+            Val::I32(val_i32) => u32::try_from(val_i32).with_context(|| {
+                format!("array copy count must be non-negative, {val_i32} is not")
+            }),
+            Val::I64(val_i64) => u32::try_from(val_i64).with_context(|| {
+                format!("array copy count must be non-negative, {val_i64} is not")
+            }),
             _other => {
                 panic!("not sure how to get val from here... bc count is {count:?}")
             }
-        }
-        .expect("conversion to usize should work...");
+        }?;
 
         ArrayRef::new(store, allocator, &val, len).map(Val::from)
     }
@@ -475,7 +479,7 @@ impl Runtime {
     fn alloc_array_vals(
         &self,
         mut store: impl AsContextMut<Data = ()>,
-        vals: Vec<Val>,
+        vals: &[Val],
     ) -> Result<Val> {
         assert!(!vals.is_empty());
 
@@ -483,7 +487,7 @@ impl Runtime {
             panic!("should not try to alloc empty arrays...");
         };
 
-        let val_type: ValTypeEq = ValTypeEq(self.get_abstract_ty(store.as_context(), *first_val));
+        let val_type: ValTypeEq = ValTypeEq(Self::get_abstract_ty(&store.as_context(), first_val));
         let make_allocator = |val_type: &ValTypeEq| {
             let array_ty = wasmtime::ArrayType::new(
                 &self.engine,
@@ -498,14 +502,10 @@ impl Runtime {
             .entry(val_type)
             .or_insert_with_key(make_allocator);
 
-        ArrayRef::new_fixed(store, allocator, &vals).map(Val::from)
+        ArrayRef::new_fixed(store, allocator, vals).map(Val::from)
     }
 
-    fn alloc_tuple(
-        &self,
-        mut store: impl AsContextMut<Data = ()>,
-        fields: Vec<Val>,
-    ) -> Result<Val> {
+    fn alloc_tuple(&self, mut store: impl AsContextMut<Data = ()>, fields: &[Val]) -> Result<Val> {
         if fields.is_empty()
             && let Some(unit) = self.unit.get()
         {
@@ -514,8 +514,7 @@ impl Runtime {
 
         let field_tys = fields
             .iter()
-            .copied()
-            .map(|val| ValTypeEq(self.get_abstract_ty(store.as_context(), val)))
+            .map(|val| ValTypeEq(Self::get_abstract_ty(&store.as_context(), val)))
             .collect::<Vec<_>>();
 
         let make_struct_alloc = |field_tys: &Vec<ValTypeEq>| {
@@ -534,7 +533,7 @@ impl Runtime {
             .entry(field_tys)
             .or_insert_with_key(make_struct_alloc);
 
-        let struct_ref = StructRef::new(&mut store, alloc, &fields)?;
+        let struct_ref = StructRef::new(&mut store, alloc, fields)?;
         Ok(Val::from(struct_ref))
     }
 
@@ -547,7 +546,7 @@ impl Runtime {
                     .iter()
                     .map(|name| Val::FuncRef(Some(self.functions()[name].handle)))
                     .collect_vec();
-                let vtable = self.alloc_tuple(store, funcs)?;
+                let vtable = self.alloc_tuple(store, &funcs)?;
                 entry.insert(vtable);
                 Ok(vtable)
             }
@@ -572,7 +571,7 @@ impl WasmFunc for bc::Function {
             locals,
             pc: bc::Location::START,
             store: caller.as_context_mut(),
-            stack_allocs: Default::default(),
+            stack_allocs: StackAllocs::default(),
             ret_val: OnceCell::new(),
         };
         frame.eval()
@@ -756,6 +755,7 @@ impl Frame<'_> {
             .context("ICE: not an arrayref")
     }
 
+    #[allow(clippy::unused_self)]
     fn func_ref(&mut self, val: Val) -> Result<Func> {
         Ok(*val
             .func_ref()
@@ -856,11 +856,20 @@ impl Frame<'_> {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn eval_rvalue(&mut self, rvalue: &bc::Rvalue) -> Result<Val> {
         Ok(match rvalue {
             bc::Rvalue::Operand(op) => self.eval_operand(op)?,
 
             bc::Rvalue::Binop { op, left, right } => {
+                use bc::{
+                    Binop::{
+                        Add, And, BitAnd, BitOr, Concat, Div, Eq, Exp, Ge, Gt, Le, Lt, Mul, Neq,
+                        Or, Rem, Shl, Shr, Sub,
+                    },
+                    TypeKind::{Bool, Float, Int, String},
+                };
+
                 let lty = left.ty();
                 let left_val = self.eval_operand(left)?;
                 let right_val = self.eval_operand(right)?;
@@ -877,7 +886,6 @@ impl Frame<'_> {
                     }};
                 }
 
-                use bc::{Binop::*, TypeKind::*};
                 match (op, lty.kind()) {
                     (Add, Int) => op!(i32, i32, i32::wrapping_add),
                     (Add, Float) => op!(f32, f32, f32::add),
@@ -889,10 +897,22 @@ impl Frame<'_> {
                     (Div, Float) => op!(f32, f32, f32::div),
                     (Rem, Int) => op!(i32, i32, i32::wrapping_rem),
                     (Rem, Float) => op!(f32, f32, |n1, n2| n1 % n2),
-                    (Exp, Int) => op!(i32, i32, |n1, n2| i32::pow(n1, n2 as u32)),
+                    (Exp, Int) => op!(i32, i32, |n1, n2: i32| i32::pow(
+                        n1,
+                        n2.try_into()
+                            .unwrap_or_else(|_| panic!("{n2} can't be converted into a u32"))
+                    )),
                     (Exp, Float) => op!(f32, f32, f32::powf),
-                    (Shl, Int) => op!(i32, i32, |n1, n2| i32::wrapping_shl(n1, n2 as u32)),
-                    (Shr, Int) => op!(i32, i32, |n1, n2| i32::wrapping_shr(n1, n2 as u32)),
+                    (Shl, Int) => op!(i32, i32, |n1, n2: i32| i32::wrapping_shl(
+                        n1,
+                        n2.try_into()
+                            .unwrap_or_else(|_| panic!("{n2} can't be converted into a u32"))
+                    )),
+                    (Shr, Int) => op!(i32, i32, |n1, n2: i32| i32::wrapping_shr(
+                        n1,
+                        n2.try_into()
+                            .unwrap_or_else(|_| panic!("{n2} can't be converted into a u32"))
+                    )),
                     (BitOr, Int) => op!(i32, i32, |n1, n2| n1 | n2),
                     (BitAnd, Int) => op!(i32, i32, |n1, n2| n1 & n2),
                     (Ge, Int) => op!(i32, i32, |n1, n2| i32::ge(&n1, &n2)),
@@ -931,7 +951,7 @@ impl Frame<'_> {
                             struct_: *struct_,
                         };
                         let vtable = self.rt.alloc_vtable(store!(self), impl_)?;
-                        self.rt.alloc_tuple(store!(self), vec![val, vtable])?
+                        self.rt.alloc_tuple(store!(self), &[val, vtable])?
                     }
                     (ty1, ty2) => unimplemented!("cast {ty1} as {ty2}"),
                 }
@@ -944,7 +964,7 @@ impl Frame<'_> {
                     args: bc::AllocArgs::Lit(env.clone()),
                 })?;
                 let func = Val::FuncRef(Some(self.rt.functions()[f].handle));
-                self.rt.alloc_tuple(store!(self), vec![func, env])?
+                self.rt.alloc_tuple(store!(self), &[func, env])?
             }
 
             bc::Rvalue::Alloc { kind, args, loc } => match args {
@@ -955,28 +975,21 @@ impl Frame<'_> {
                         .collect::<Result<Vec<_>>>()?;
 
                     match (kind, loc) {
-                        (bc::AllocKind::Tuple, bc::AllocLoc::Heap)
-                        | (bc::AllocKind::Struct, bc::AllocLoc::Heap) => {
-                            self.rt.alloc_tuple(store!(self), fields)?
+                        (bc::AllocKind::Tuple | bc::AllocKind::Struct, bc::AllocLoc::Heap) => {
+                            self.rt.alloc_tuple(store!(self), &fields)?
                         }
                         (bc::AllocKind::Array, bc::AllocLoc::Heap) => {
-                            self.rt.alloc_array_vals(store!(self), fields)?
+                            self.rt.alloc_array_vals(store!(self), &fields)?
                         }
-                        (bc::AllocKind::Tuple, bc::AllocLoc::Stack) => {
+                        (bc::AllocKind::Tuple | bc::AllocKind::Struct, bc::AllocLoc::Stack) => {
                             self.stack_alloc_tuple(fields)?
                         }
                         (bc::AllocKind::Array, bc::AllocLoc::Stack) => {
                             self.stack_alloc_array(fields)?
                         }
-                        (bc::AllocKind::Struct, bc::AllocLoc::Stack) => {
-                            self.stack_alloc_tuple(fields)?
-                        }
                     }
                 }
                 bc::AllocArgs::Repeated { op, count } => {
-                    // if *loc == AllocLoc::Stack {
-                    //     todo!();
-                    // }
                     let bc::AllocKind::Array = *kind else {
                         panic!("should only ever construct repeated allocations for arrays...");
                     };
@@ -987,8 +1000,12 @@ impl Frame<'_> {
                     match loc {
                         AllocLoc::Stack => self.stack_alloc_array(vec![
                             res;
-                            count.i32().expect("shoudl work i think...")
-                                as usize
+                            {
+                                let count: i32 = count.i32().expect("shoudl work i think...");
+                                count.try_into().with_context(|| {
+                                    format!("array copy count must be non-negative, {count} is not")
+                                })?
+                            }
                         ])?,
                         AllocLoc::Heap => self.rt.alloc_array_copy(store!(self), res, count)?,
                     }
@@ -1031,7 +1048,7 @@ impl Frame<'_> {
                     .map(|arg| self.eval_operand(arg))
                     .collect::<Result<Vec<_>>>()?;
                 arg_vals.insert(0, self_);
-                let dummy_env = self.rt.alloc_tuple(store!(self), vec![])?;
+                let dummy_env = self.rt.alloc_tuple(store!(self), &[])?;
                 arg_vals.insert(0, dummy_env);
 
                 let vtable_struct = self.struct_ref(vtable)?;

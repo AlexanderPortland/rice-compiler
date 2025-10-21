@@ -90,7 +90,7 @@ impl fmt::Display for Rvalue {
                 match args {
                     AllocArgs::Lit(args) => write_comma_separated(f, args)?,
                     AllocArgs::Repeated { op, count } => write!(f, "{op}; {count}")?,
-                };
+                }
                 write!(f, ")")
             }
             Rvalue::Binop { op, left, right } => write!(f, "{left} {op} {right}"),
@@ -144,8 +144,8 @@ impl fmt::Display for Place {
         write!(f, "{}", self.local)?;
         for proj in &self.projection {
             match proj {
-                ProjectionElem::Field { index, .. } => write!(f, ".{}", index)?,
-                ProjectionElem::Index { index, .. } => write!(f, "[{}]", index)?,
+                ProjectionElem::Field { index, .. } => write!(f, ".{index}")?,
+                ProjectionElem::Index { index, .. } => write!(f, "[{index}]")?,
             }
         }
         Ok(())

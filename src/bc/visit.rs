@@ -5,7 +5,10 @@
 use either::Either;
 use itertools::Itertools;
 
-use crate::bc::types::*;
+use crate::bc::types::{
+    AllocArgs, BasicBlock, BasicBlockIdx, Body, Function, Location, Operand, Place, Program,
+    ProjectionElem, Rvalue, Statement, Terminator, TerminatorKind,
+};
 
 pub trait Visit {
     fn visit_program(&mut self, prog: &Program) {
@@ -65,8 +68,10 @@ pub trait Visit {
         }
     }
 
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     fn visit_lvalue(&mut self, _place: &Place, _loc: Location) {}
 
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     fn visit_rvalue_place(&mut self, _place: &Place, _loc: Location) {}
 
     fn visit_rvalue(&mut self, rvalue: &Rvalue, loc: Location) {
@@ -75,10 +80,7 @@ pub trait Visit {
 
     fn super_visit_rvalue(&mut self, rvalue: &Rvalue, loc: Location) {
         match rvalue {
-            Rvalue::Operand(op) => {
-                self.visit_operand(op, loc);
-            }
-            Rvalue::Cast { op, .. } => {
+            Rvalue::Operand(op) | Rvalue::Cast { op, .. } => {
                 self.visit_operand(op, loc);
             }
             Rvalue::Closure { env, .. } => {
@@ -125,8 +127,7 @@ pub trait Visit {
             Operand::Place(place) => {
                 self.visit_rvalue_place(place, loc);
             }
-            Operand::Const(_) => {}
-            Operand::Func { .. } => {}
+            Operand::Const(_) | Operand::Func { .. } => {}
         }
     }
 }
@@ -168,7 +169,7 @@ pub trait VisitMut {
 
     fn super_visit_basic_block(&mut self, data: &mut BasicBlock, block: BasicBlockIdx) {
         for (instr, statement) in data.statements.iter_mut().enumerate() {
-            self.visit_statement(statement, Location { block, instr })
+            self.visit_statement(statement, Location { block, instr });
         }
 
         let term_loc = Location {
@@ -230,10 +231,7 @@ pub trait VisitMut {
 
     fn super_visit_rvalue(&mut self, rvalue: &mut Rvalue, loc: Location) {
         match rvalue {
-            Rvalue::Operand(op) => {
-                self.visit_operand(op, loc);
-            }
-            Rvalue::Cast { op, .. } => {
+            Rvalue::Operand(op) | Rvalue::Cast { op, .. } => {
                 self.visit_operand(op, loc);
             }
             Rvalue::Closure { env, .. } => {
@@ -280,8 +278,7 @@ pub trait VisitMut {
             Operand::Place(place) => {
                 self.visit_place(place, loc);
             }
-            Operand::Const(_) => {}
-            Operand::Func { .. } => {}
+            Operand::Const(_) | Operand::Func { .. } => {}
         }
     }
 }

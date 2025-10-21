@@ -11,7 +11,7 @@ use crate::{
     rt,
     utils::Symbol,
 };
-use core::ops::*;
+use core::ops::{Add, Div, Fn, Mul, RangeBounds, Sub};
 use indexical::{
     ArcIndexSet, ArcIndexVec, RcIndexSet, ToIndex, pointer::PointerFamily, vec::IndexVec,
 };
@@ -50,7 +50,7 @@ impl VisitMut for ConstProp<'_> {
             && let ConstInfo::Const(c) = self.info.get(loc).get(p.local).clone()
         {
             self.any_change |= true;
-            *operand = Operand::Const(c)
+            *operand = Operand::Const(c);
         }
         self.super_visit_operand(operand, loc);
     }
@@ -104,9 +104,7 @@ impl VisitMut for ConstProp<'_> {
                     .find_edge(block.into(), never_jump_to.into())
                     .expect("there should be an edge here...");
                 let rem = body.cfg_mut().remove_edge(edge_index);
-                if rem.is_none() {
-                    panic!("ahhhh");
-                }
+                assert!(rem.is_some(), "ahhhh");
             }
         }
 
@@ -126,7 +124,9 @@ impl VisitMut for ConstProp<'_> {
             && let ConstInfo::Closure(closure_symbol) = self.info.get(loc).get(p_fun.local).clone()
         {
             let fn_ty = Type::func(
-                args.iter().map(|a| a.ty()).collect::<Vec<_>>(),
+                args.iter()
+                    .map(super::super::types::Operand::ty)
+                    .collect::<Vec<_>>(),
                 stmt.place.ty,
             );
             stmt.rvalue = Rvalue::Call {
@@ -165,8 +165,9 @@ impl ConstInfo {
 impl PartialOrd for ConstInfo {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
-            (Self::Unknown, Self::Unknown) => Some(std::cmp::Ordering::Equal),
-            (Self::Variable, Self::Variable) => Some(std::cmp::Ordering::Equal),
+            (Self::Unknown, Self::Unknown) | (Self::Variable, Self::Variable) => {
+                Some(std::cmp::Ordering::Equal)
+            }
             (Self::Unknown, _) | (_, Self::Variable) => Some(std::cmp::Ordering::Less),
             (_, Self::Unknown) | (Self::Variable, _) => Some(std::cmp::Ordering::Greater),
             _ => None,
@@ -185,11 +186,11 @@ impl JoinSemiLattice for ArcIndexVec<Local, ConstInfo> {
             match (*my_info).partial_cmp(new_info) {
                 Some(std::cmp::Ordering::Less) => {
                     changed |= true;
-                    *my_info = new_info.clone()
+                    *my_info = new_info.clone();
                 }
                 None => {
                     changed |= true;
-                    *my_info = ConstInfo::Variable
+                    *my_info = ConstInfo::Variable;
                 }
                 _ => (),
             }
@@ -203,8 +204,8 @@ impl ConstAnalysis {
         // println!("eval rvalue {:?}", rvalue);
         match rvalue {
             Rvalue::Operand(op) => Self::const_eval_operand(state, op),
-            Rvalue::Binop { op, left, right } => Self::const_eval_binop(state, op, left, right),
-            Rvalue::Cast { op, ty } => Self::const_eval_cast(state, op, ty),
+            Rvalue::Binop { op, left, right } => Self::const_eval_binop(state, *op, left, right),
+            Rvalue::Cast { op, ty } => Self::const_eval_cast(state, op, *ty),
             Rvalue::Closure { f, env } => {
                 if env.is_empty() {
                     Some(ConstInfo::Closure(*f))
@@ -217,15 +218,19 @@ impl ConstAnalysis {
         }
     }
 
-    fn do_int_op_on_consts_inner(left: Const, right: Const, op: impl Fn(i32, i32) -> i32) -> Const {
+    fn do_int_op_on_consts_inner(
+        left: &Const,
+        right: &Const,
+        op: impl Fn(i32, i32) -> i32,
+    ) -> Const {
         let left = left.as_int().expect("should be int");
         let right = right.as_int().expect("should be int");
         Const::Int(op(left, right))
     }
 
     fn do_int_op_on_consts(
-        left: Const,
-        right: Const,
+        left: &Const,
+        right: &Const,
         op: impl Fn(i32, i32) -> i32,
     ) -> Option<ConstInfo> {
         Some(ConstInfo::Const(Self::do_int_op_on_consts_inner(
@@ -236,7 +241,7 @@ impl ConstAnalysis {
     fn const_eval_cast(
         state: &<Self as Analysis>::Domain,
         op: &Operand,
-        cast_to: &Type,
+        cast_to: Type,
     ) -> Option<ConstInfo> {
         // println!("casing op {:?} to {:?}", op, cast_to);
         // todo!()
@@ -246,7 +251,7 @@ impl ConstAnalysis {
 
     fn const_eval_binop(
         state: &<Self as Analysis>::Domain,
-        op: &Binop,
+        op: Binop,
         left: &Operand,
         right: &Operand,
     ) -> Option<ConstInfo> {
@@ -265,9 +270,7 @@ impl ConstAnalysis {
             _ => return None,
         };
 
-        if right.ty() != left.ty() {
-            panic!("weird typing shit");
-        }
+        assert!(right.ty() == left.ty(), "weird typing shit");
 
         let new_const = match (left, right) {
             (Const::Bool(left), Const::Bool(right)) => Const::Bool(match op {
@@ -284,9 +287,13 @@ impl ConstAnalysis {
                     Binop::Mul => i32::wrapping_mul,
                     Binop::Div => i32::wrapping_div,
                     Binop::Rem => i32::wrapping_rem,
-                    Binop::Exp => |left, right| i32::pow(left, right as u32),
-                    Binop::Shl => |left, right| i32::wrapping_shl(left, right as u32),
-                    Binop::Shr => |left, right| i32::wrapping_shr(left, right as u32),
+                    Binop::Exp => |left, right: i32| i32::pow(left, u32::try_from(right).unwrap()),
+                    Binop::Shl => {
+                        |left, right: i32| i32::wrapping_shl(left, u32::try_from(right).unwrap())
+                    }
+                    Binop::Shr => {
+                        |left, right: i32| i32::wrapping_shr(left, u32::try_from(right).unwrap())
+                    }
                     Binop::BitOr => |left, right| left | right,
                     Binop::BitAnd => |left, right| left & right,
 
@@ -349,7 +356,7 @@ impl ConstAnalysis {
                     None
                 }
             }
-            _ => None,
+            Operand::Func { .. } => None,
         }
     }
 }

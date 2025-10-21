@@ -11,7 +11,7 @@ use crate::utils::{indent, write_comma_separated, write_newline_separated};
 impl fmt::Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for item in &self.0 {
-            write!(f, "{}\n", item)?;
+            write!(f, "{item}\n")?;
         }
         Ok(())
     }
@@ -74,12 +74,12 @@ impl fmt::Display for Function {
         let params: Vec<_> = self
             .params
             .iter()
-            .map(|(name, ty)| format!("{}: {}", name, ty))
+            .map(|(name, ty)| format!("{name}: {ty}"))
             .collect();
         write_comma_separated(f, &params)?;
         write!(f, ")")?;
         if let Some(ty) = &self.ret_ty {
-            write!(f, " -> {}", ty)?;
+            write!(f, " -> {ty}")?;
         }
         write!(f, " {{\n{}\n}}", indent(format!("{}", self.body)))
     }
@@ -94,16 +94,16 @@ impl<T: fmt::Display> fmt::Display for Spanned<T> {
 impl fmt::Display for ExprKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExprKind::Var(name) => write!(f, "{}", name),
-            ExprKind::Const(c) => write!(f, "{}", c),
+            ExprKind::Var(name) => write!(f, "{name}"),
+            ExprKind::Const(c) => write!(f, "{c}"),
             ExprKind::New { name, args } => {
                 write!(f, "new {name}(")?;
                 write_comma_separated(f, args)?;
                 write!(f, ")")
             }
-            ExprKind::Binop { left, op, right } => write!(f, "({} {} {})", left, op, right),
+            ExprKind::Binop { left, op, right } => write!(f, "({left} {op} {right})"),
             ExprKind::Call { f: func, args } => {
-                write!(f, "{}(", func)?;
+                write!(f, "{func}(")?;
                 write_comma_separated(f, args)?;
                 write!(f, ")")
             }
@@ -121,16 +121,16 @@ impl fmt::Display for ExprKind {
                     f,
                     "if {} {{\n{}\n}} else {{\n{}\n}}",
                     cond,
-                    indent(format!("{}", then_)),
-                    indent(format!("{}", else_expr))
+                    indent(format!("{then_}")),
+                    indent(format!("{else_expr}"))
                 ),
-                None => write!(f, "if {} {{\n{}\n}}", cond, indent(format!("{}", then_))),
+                None => write!(f, "if {} {{\n{}\n}}", cond, indent(format!("{then_}"))),
             },
             ExprKind::Let { name, ty, e1, e2 } => match ty {
-                Some(ty) => write!(f, "let {}: {} = {} in\n{}", name, ty, e1, e2),
-                None => write!(f, "let {} = {} in\n{}", name, e1, e2),
+                Some(ty) => write!(f, "let {name}: {ty} = {e1} in\n{e2}"),
+                None => write!(f, "let {name} = {e1} in\n{e2}"),
             },
-            ExprKind::Assign { dst, src } => write!(f, "{} := {}", dst, src),
+            ExprKind::Assign { dst, src } => write!(f, "{dst} := {src}"),
             ExprKind::Lambda {
                 params,
                 ret_ty,
@@ -139,25 +139,25 @@ impl fmt::Display for ExprKind {
                 write!(f, "\\(")?;
                 let params: Vec<_> = params
                     .iter()
-                    .map(|(name, ty)| format!("{}: {}", name, ty))
+                    .map(|(name, ty)| format!("{name}: {ty}"))
                     .collect();
                 write_comma_separated(f, &params)?;
-                write!(f, ") -> {}. {}", ret_ty, body)
+                write!(f, ") -> {ret_ty}. {body}")
             }
-            ExprKind::Seq(e1, e2) => write!(f, "{};\n{}", e1, e2),
+            ExprKind::Seq(e1, e2) => write!(f, "{e1};\n{e2}"),
             ExprKind::Tuple(exprs) => {
                 write!(f, "(")?;
                 write_comma_separated(f, exprs)?;
                 write!(f, ")")
             }
-            ExprKind::Project { e, i } => write!(f, "{}.{}", e, i),
-            ExprKind::Cast { e, ty } => write!(f, "{} as {}", e, ty),
-            ExprKind::Loop(body) => write!(f, "loop {{\n{}\n}}", indent(format!("{}", body))),
+            ExprKind::Project { e, i } => write!(f, "{e}.{i}"),
+            ExprKind::Cast { e, ty } => write!(f, "{e} as {ty}"),
+            ExprKind::Loop(body) => write!(f, "loop {{\n{}\n}}", indent(format!("{body}"))),
             ExprKind::Break => write!(f, "break"),
             ExprKind::While { cond, body } => {
-                write!(f, "while {} {{\n{}\n}}", cond, indent(format!("{}", body)))
+                write!(f, "while {} {{\n{}\n}}", cond, indent(format!("{body}")))
             }
-            ExprKind::Return(e) => write!(f, "return {}", e),
+            ExprKind::Return(e) => write!(f, "return {e}"),
             ExprKind::ArrayCopy { e, count } => write!(f, "[|{e}-{count}|]"),
             ExprKind::ArrayLit(exprs) => {
                 write!(f, "[")?;
@@ -171,7 +171,10 @@ impl fmt::Display for ExprKind {
 
 impl fmt::Display for Binop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use Binop::*;
+        use Binop::{
+            Add, And, BitAnd, BitOr, Concat, Div, Eq, Exp, Ge, Gt, Le, Lt, Mul, Neq, Or, Rem, Shl,
+            Shr, Sub,
+        };
         match self {
             Add => write!(f, "+"),
             Sub => write!(f, "-"),
@@ -199,10 +202,10 @@ impl fmt::Display for Binop {
 impl fmt::Display for Const {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Const::Int(i) => write!(f, "{}", i),
+            Const::Int(i) => write!(f, "{i}"),
             Const::Float(fl) => write!(f, "{}", fl.0),
-            Const::Bool(b) => write!(f, "{}", b),
-            Const::String(s) => write!(f, "\"{}\"", s),
+            Const::Bool(b) => write!(f, "{b}"),
+            Const::String(s) => write!(f, "\"{s}\""),
         }
     }
 }
@@ -226,7 +229,7 @@ impl fmt::Display for TypeKind {
             TypeKind::Func { inputs, output } => {
                 write!(f, "fn(")?;
                 write_comma_separated(f, inputs)?;
-                write!(f, ") -> {}", output)
+                write!(f, ") -> {output}")
             }
             TypeKind::Hole(n) => write!(f, "?{n}"),
         }

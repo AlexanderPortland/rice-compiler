@@ -137,7 +137,7 @@ impl CodegenModule<'_> {
         })
     }
 
-    fn convert_wasmtime_field_ty(&mut self, field: wasmtime::FieldType) -> FieldType {
+    fn convert_wasmtime_field_ty(&mut self, field: &wasmtime::FieldType) -> FieldType {
         FieldType {
             element_type: match field.element_type() {
                 wasmtime::StorageType::ValType(ty) => {
@@ -169,7 +169,7 @@ impl CodegenModule<'_> {
                     wasmtime::HeapType::ConcreteStruct(ty) => {
                         let fields = ty
                             .fields()
-                            .map(|field| self.convert_wasmtime_field_ty(field))
+                            .map(|field| self.convert_wasmtime_field_ty(&field))
                             .collect::<Box<[_]>>();
                         let idx = self.wasm_struct_ty_idx(StructType { fields });
                         HeapType::Concrete(idx)
@@ -242,28 +242,26 @@ impl CodegenModule<'_> {
     }
 
     fn wasm_struct_ty_idx(&mut self, ty: StructType) -> u32 {
-        match self.struct_ty_idx.get(&ty) {
-            Some(idx) => *idx,
-            None => {
-                self.types.ty().struct_(ty.fields.clone());
-                let idx = self.types.len() - 1;
-                self.struct_ty_idx.insert(ty, idx);
-                idx
-            }
+        if let Some(idx) = self.struct_ty_idx.get(&ty) {
+            *idx
+        } else {
+            self.types.ty().struct_(ty.fields.clone());
+            let idx = self.types.len() - 1;
+            self.struct_ty_idx.insert(ty, idx);
+            idx
         }
     }
 
     fn wasm_array_ty_idx(&mut self, ty: StorageType) -> u32 {
-        match self.array_ty_idx.get(&ty) {
-            Some(idx) => *idx,
-            None => {
-                self.types
-                    .ty()
-                    .array(&ty, true /* structs mutable by default */);
-                let idx = self.types.len() - 1;
-                self.array_ty_idx.insert(ty, idx);
-                idx
-            }
+        if let Some(idx) = self.array_ty_idx.get(&ty) {
+            *idx
+        } else {
+            self.types
+                .ty()
+                .array(&ty, true /* structs mutable by default */);
+            let idx = self.types.len() - 1;
+            self.array_ty_idx.insert(ty, idx);
+            idx
         }
     }
 
@@ -402,7 +400,7 @@ impl CodegenFunc<'_, '_> {
             .input_func
             .body
             .cfg()
-            .map(|_, block| self.gen_block(block), |_, _| ());
+            .map(|_, block| self.gen_block(block), |_, ()| ());
         let return_type = self.module.gen_ty(self.input_func.ret_ty);
         reloop::reloop(&mut self.output_func, wasm_cfg, return_type);
         self.output_func.instructions().end();
@@ -445,7 +443,10 @@ impl CodegenFunc<'_, '_> {
             for elem in &p.projection[..p.projection.len() - 1] {
                 match elem {
                     bc::ProjectionElem::Field { index, ty } => {
-                        instrs.struct_get(self.module.tuple_ty_idx(*ty), *index as u32);
+                        instrs.struct_get(
+                            self.module.tuple_ty_idx(*ty),
+                            u32::try_from(*index).unwrap(),
+                        );
                     }
                     bc::ProjectionElem::Index { index, ty } => {
                         self.gen_operand(index, instrs);
@@ -457,7 +458,10 @@ impl CodegenFunc<'_, '_> {
             match p.projection.last().unwrap() {
                 bc::ProjectionElem::Field { index, ty } => {
                     self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
-                    instrs.struct_set(self.module.tuple_ty_idx(*ty), *index as u32);
+                    instrs.struct_set(
+                        self.module.tuple_ty_idx(*ty),
+                        u32::try_from(*index).unwrap(),
+                    );
                 }
                 bc::ProjectionElem::Index { index, ty } => {
                     self.gen_operand(index, instrs);
@@ -472,7 +476,7 @@ impl CodegenFunc<'_, '_> {
         match op {
             bc::Operand::Const(c) => match c {
                 bc::Const::Bool(b) => {
-                    instrs.i32_const(if *b { 1 } else { 0 });
+                    instrs.i32_const(i32::from(*b));
                 }
                 bc::Const::Int(n) => {
                     instrs.i32_const(*n);
@@ -484,31 +488,38 @@ impl CodegenFunc<'_, '_> {
                     let offset = self.module.data_offset;
                     self.module.data.active(
                         0,
-                        &ConstExpr::i32_const(offset as i32),
+                        &ConstExpr::i32_const(i32::try_from(offset).unwrap()),
                         s.as_bytes().iter().copied(),
                     );
-                    self.module.data_offset += s.len() as u32;
+                    self.module.data_offset += u32::try_from(s.len()).unwrap();
 
                     instrs.struct_new(self.module.tuple_ty_idx(bc::Type::unit()));
-                    instrs.i32_const(offset as i32);
-                    instrs.i32_const(s.len() as i32);
+                    instrs.i32_const(i32::try_from(offset).unwrap());
+                    instrs.i32_const(i32::try_from(s.len()).unwrap());
                     let alloc_idx = self.module.func_name_to_code_idx[&Symbol::new("alloc_string")];
                     instrs.call(alloc_idx);
                 }
             },
             bc::Operand::Place(p) => self.gen_load(*p, instrs),
             bc::Operand::Func { f, ty } => {
-                self.gen_rvalue(&bc::Rvalue::Closure { f: *f, env: vec![] }, *ty, instrs)
+                self.gen_rvalue(&bc::Rvalue::Closure { f: *f, env: vec![] }, *ty, instrs);
             }
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn gen_rvalue(&mut self, rvalue: &bc::Rvalue, ty: bc::Type, instrs: &mut InstructionSink) {
         match rvalue {
             bc::Rvalue::Operand(op) => self.gen_operand(op, instrs),
 
             bc::Rvalue::Binop { op, left, right } => {
-                use bc::{Binop::*, TypeKind::*};
+                use bc::{
+                    Binop::{
+                        Add, And, BitAnd, BitOr, Concat, Div, Eq, Ge, Gt, Le, Lt, Mul, Neq, Or,
+                        Rem, Shl, Shr, Sub,
+                    },
+                    TypeKind::{Float, Int, String},
+                };
 
                 // Special case this because we need to add the empty environment when calling a function.
                 if matches!(op, Concat) {
@@ -568,7 +579,7 @@ impl CodegenFunc<'_, '_> {
 
             bc::Rvalue::Alloc { kind, args, loc } => match args {
                 bc::AllocArgs::Lit(ops) => {
-                    for el in ops.iter() {
+                    for el in ops {
                         self.gen_operand(el, instrs);
                     }
 
@@ -627,7 +638,11 @@ impl CodegenFunc<'_, '_> {
                         kind: bc::AllocKind::Tuple,
                         loc: bc::AllocLoc::Heap,
                     },
-                    bc::Type::tuple(env.iter().map(|op| op.ty()).collect()),
+                    bc::Type::tuple(
+                        env.iter()
+                            .map(super::super::bc::types::Operand::ty)
+                            .collect(),
+                    ),
                     instrs,
                 );
 
@@ -670,7 +685,10 @@ impl CodegenFunc<'_, '_> {
         for elem in &place.projection {
             match elem {
                 bc::ProjectionElem::Field { index, ty } => {
-                    instrs.struct_get(self.module.tuple_ty_idx(*ty), *index as u32);
+                    instrs.struct_get(
+                        self.module.tuple_ty_idx(*ty),
+                        u32::try_from(*index).expect("shouldn't have numbers this big"),
+                    );
                 }
 
                 bc::ProjectionElem::Index { index, ty } => {

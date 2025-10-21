@@ -26,6 +26,7 @@ pub enum TypeKind {
 interned!(Type, TypeKind);
 
 impl Type {
+    #[must_use]
     pub fn new(kind: TypeKind) -> Self {
         Type(Intern::new(kind))
     }
@@ -54,39 +55,48 @@ impl Type {
     type_constructor!(unit, TypeKind::Tuple(Vec::new()));
     type_constructor!(self_, TypeKind::Self_);
 
+    #[must_use]
     pub fn struct_(name: Symbol) -> Self {
         Type(Intern::new(TypeKind::Struct(name)))
     }
 
+    #[must_use]
     pub fn interface(name: Symbol) -> Self {
         Type(Intern::new(TypeKind::Interface(name)))
     }
 
+    #[must_use]
     pub fn tuple(tys: Vec<Type>) -> Self {
         Type(Intern::new(TypeKind::Tuple(tys)))
     }
 
+    #[must_use]
     pub fn array(inner_ty: Type) -> Self {
         Type(Intern::new(TypeKind::Array(inner_ty)))
     }
 
+    #[must_use]
     pub fn func(inputs: Vec<Type>, output: Type) -> Self {
         Type(Intern::new(TypeKind::Func { inputs, output }))
     }
 
+    #[must_use]
     pub fn hole(n: usize) -> Self {
         Type(Intern::new(TypeKind::Hole(n)))
     }
 
+    #[must_use]
     pub fn kind(self) -> &'static TypeKind {
         self.0.as_ref()
     }
 
+    #[must_use]
     pub fn is_hole(&self) -> bool {
         matches!(self.kind(), TypeKind::Hole(_))
     }
 
     /// Substitute holes for types by running a function `f` on each hole.
+    #[must_use]
     pub fn subst(self, f: &mut impl FnMut(usize) -> Type) -> Type {
         match self.kind() {
             TypeKind::Int
@@ -108,6 +118,7 @@ impl Type {
 }
 
 impl TypeKind {
+    #[must_use]
     pub fn is_unit(&self) -> bool {
         match self {
             TypeKind::Tuple(v) => v.is_empty(),
@@ -115,11 +126,13 @@ impl TypeKind {
         }
     }
 
+    #[must_use]
     pub fn is_numeric(&self) -> bool {
         matches!(self, TypeKind::Int | TypeKind::Float)
     }
 
     /// Tests types for alpha-equivalence.
+    #[must_use]
     pub fn equiv(&self, other: &TypeKind) -> bool {
         match (self, other) {
             (TypeKind::Int, TypeKind::Int)
@@ -190,6 +203,7 @@ pub struct MethodSig {
 }
 
 impl MethodSig {
+    #[must_use]
     pub fn inputs(&self) -> &[Type] {
         let TypeKind::Func { inputs, .. } = self.sig.kind() else {
             unreachable!()
@@ -197,6 +211,7 @@ impl MethodSig {
         inputs
     }
 
+    #[must_use]
     pub fn output(&self) -> Type {
         let TypeKind::Func { output, .. } = self.sig.kind() else {
             unreachable!()
@@ -243,6 +258,7 @@ pub enum Const {
 }
 
 impl Const {
+    #[must_use]
     pub fn ty(&self) -> Type {
         match self {
             Const::Bool(..) => Type::bool(),
@@ -252,6 +268,7 @@ impl Const {
         }
     }
 
+    #[must_use]
     pub fn as_int(&self) -> Option<i32> {
         match self {
             Const::Int(n) => Some(*n),

@@ -2,7 +2,11 @@
 
 use std::{collections::HashMap, sync::LazyLock};
 
-use super::{Tcx, types::*, visit::VisitMut};
+use super::{
+    Tcx,
+    types::{Expr, ExprKind, Function, Program, Type},
+    visit::VisitMut,
+};
 use crate::utils::{Symbol, sym};
 
 struct SubstEnv {

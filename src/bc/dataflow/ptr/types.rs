@@ -98,7 +98,7 @@ impl fmt::Display for PtrPlace {
         write!(f, "{}", self.local)?;
         for proj in &self.projection {
             match proj {
-                AllocProj::Field(index) => write!(f, ".{}", index)?,
+                AllocProj::Field(index) => write!(f, ".{index}")?,
                 AllocProj::Index => write!(f, "[?]")?,
             }
         }

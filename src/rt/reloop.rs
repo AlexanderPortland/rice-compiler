@@ -65,7 +65,7 @@ pub fn reloop(func: &mut Function, graph: WasmCfg, return_type: ValType) {
         loop_nodes,
         rpo,
     }
-    .do_tree(BlockType::Result(return_type), root, &[])
+    .do_tree(BlockType::Result(return_type), root, &[]);
 }
 
 struct Relooper<'a> {
@@ -113,7 +113,7 @@ impl Relooper<'_> {
 
             instr!(self).end();
         } else {
-            self.node_within(return_type, root, children, context)
+            self.node_within(return_type, root, children, context);
         }
     }
 
@@ -124,35 +124,32 @@ impl Relooper<'_> {
         mut children: Vec<BasicBlockIdx>,
         context: &Context,
     ) {
-        match children.pop() {
-            Some(y_n) => {
-                let mut new_context = context.to_vec();
-                new_context.push(ContainingSyntax::BlockFollowedBy(y_n));
+        if let Some(y_n) = children.pop() {
+            let mut new_context = context.to_vec();
+            new_context.push(ContainingSyntax::BlockFollowedBy(y_n));
 
-                instr!(self).block(BlockType::Empty);
-                self.node_within(BlockType::Empty, node, children, &new_context);
-                instr!(self).end();
+            instr!(self).block(BlockType::Empty);
+            self.node_within(BlockType::Empty, node, children, &new_context);
+            instr!(self).end();
 
-                self.do_tree(return_type, y_n, context);
-            }
-            None => {
-                let block = &self.graph.node_weight(node.into()).unwrap();
-                self.func.borrow_mut().raw(block.instrs.iter().copied());
+            self.do_tree(return_type, y_n, context);
+        } else {
+            let block = &self.graph.node_weight(node.into()).unwrap();
+            self.func.borrow_mut().raw(block.instrs.iter().copied());
 
-                match block.terminator {
-                    WasmTerminator::Br(dst) => self.do_branch(return_type, node, dst, context),
-                    WasmTerminator::BrIf(true_, false_) => {
-                        let mut new_context = context.to_vec();
-                        new_context.push(ContainingSyntax::IfThenElse);
-                        instr!(self).if_(return_type);
-                        self.do_branch(return_type, node, true_, &new_context);
-                        instr!(self).else_();
-                        self.do_branch(return_type, node, false_, &new_context);
-                        instr!(self).end();
-                    }
-                    WasmTerminator::Return => {
-                        instr!(self).return_();
-                    }
+            match block.terminator {
+                WasmTerminator::Br(dst) => self.do_branch(return_type, node, dst, context),
+                WasmTerminator::BrIf(true_, false_) => {
+                    let mut new_context = context.to_vec();
+                    new_context.push(ContainingSyntax::IfThenElse);
+                    instr!(self).if_(return_type);
+                    self.do_branch(return_type, node, true_, &new_context);
+                    instr!(self).else_();
+                    self.do_branch(return_type, node, false_, &new_context);
+                    instr!(self).end();
+                }
+                WasmTerminator::Return => {
+                    instr!(self).return_();
                 }
             }
         }
@@ -167,21 +164,24 @@ impl Relooper<'_> {
     ) {
         macro_rules! index {
             () => {
-                instr!(self).br(context
-                    .iter()
-                    .rev()
-                    .position(|ctx| match ctx {
-                        ContainingSyntax::BlockFollowedBy(l) => *l == dst,
-                        ContainingSyntax::LoopHeadedBy(l) => *l == dst,
-                        _ => false,
-                    })
-                    .unwrap() as u32)
+                instr!(self).br(u32::try_from(
+                    context
+                        .iter()
+                        .rev()
+                        .position(|ctx| match ctx {
+                            ContainingSyntax::BlockFollowedBy(l) => *l == dst,
+                            ContainingSyntax::LoopHeadedBy(l) => *l == dst,
+                            _ => false,
+                        })
+                        .unwrap(),
+                )
+                .unwrap())
             };
         }
         if self.rpo[&dst] <= self.rpo[&src] || self.merge_nodes.contains(&dst) {
             index!();
         } else {
-            self.do_tree(return_type, dst, context)
+            self.do_tree(return_type, dst, context);
         }
     }
 }

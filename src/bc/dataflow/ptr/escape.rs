@@ -51,6 +51,7 @@ impl VisitMut for StackAllocate {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn escapes(func: &Function, analysis: PointerAnalysis) -> StackAllocate {
     let mut escaping_allocations = ArcIndexSet::new(analysis.alloc_domain());
     let mut places = EscapingPlaces::for_function(func);
@@ -70,7 +71,7 @@ fn escapes(func: &Function, analysis: PointerAnalysis) -> StackAllocate {
     loop {
         let old_size = escaping_allocations.len();
 
-        for allocation in escaping_allocations.iter().cloned().collect::<Vec<_>>() {
+        for allocation in escaping_allocations.iter().copied().collect::<Vec<_>>() {
             for (ptr, allocs) in analysis.points_to() {
                 if let MemLoc::Allocated(alloc, _proj) = ptr
                     && *alloc == allocation
@@ -85,6 +86,8 @@ fn escapes(func: &Function, analysis: PointerAnalysis) -> StackAllocate {
             break;
         }
     }
+
+    let _ = analysis;
 
     StackAllocate(escaping_allocations, false)
 }

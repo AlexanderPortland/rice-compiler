@@ -40,14 +40,14 @@ pub fn remove_unused_blocks(func: &mut Function) -> bool {
             }
         }
 
-        if !changed {
-            // println!("did nothing for unused");
-            break 'done;
-        } else {
+        if changed {
             // println!("did SOMETHING for unused");
             // TODO: i dont think this is the right way to do this
             // as there's still a chance a change way down the tree could get lost
             func.body.regenerate_everything();
+        } else {
+            // println!("did nothing for unused");
+            break 'done;
         }
     }
 
@@ -103,8 +103,8 @@ pub fn skip_empty_blocks(func: &mut Function) -> bool {
                     *to = *instead;
                 }
             }
-            _ => (),
-        };
+            TerminatorKind::Return(_) => (),
+        }
 
         for removed_edge in removed_to {
             changed |= true;
@@ -131,7 +131,7 @@ pub fn skip_empty_blocks(func: &mut Function) -> bool {
 
 pub fn merge_straight_line_blocks(func: &mut Function) -> bool {
     let merge_into = mergeable_blocks(func);
-    let merge_into_me = merge_into_me(merge_into, func);
+    let merge_into_me = merge_into_me(&merge_into, func);
 
     if merge_into_me.is_empty() {
         return false;
@@ -192,7 +192,7 @@ pub fn merge_straight_line_blocks(func: &mut Function) -> bool {
 }
 
 fn merge_into_me(
-    merge_into: HashMap<BasicBlockIdx, BasicBlockIdx>,
+    merge_into: &HashMap<BasicBlockIdx, BasicBlockIdx>,
     func: &Function,
 ) -> HashMap<BasicBlockIdx, Vec<BasicBlockIdx>> {
     let roots: HashSet<BasicBlockIdx> = func
@@ -202,7 +202,7 @@ fn merge_into_me(
         .collect();
 
     let mut parent_to_child: HashMap<BasicBlockIdx, BasicBlockIdx> = HashMap::new();
-    for (&child, &parent) in &merge_into {
+    for (&child, &parent) in merge_into {
         parent_to_child.insert(parent, child);
     }
 
@@ -309,7 +309,7 @@ pub fn remove_unused_locals(func: &mut Function) -> bool {
 fn used_locals(func: &Function) -> HashSet<LocalIdx> {
     let mut visit = LocalVisitor::new(&func.locals);
     visit.visit_function(func);
-    HashSet::from_iter(std::iter::once(0.into()).chain(visit.0.indices()))
+    std::iter::once(0.into()).chain(visit.0.indices()).collect()
 }
 
 struct LocalVisitor(ArcIndexSet<Local>);
@@ -329,12 +329,12 @@ impl Visit for LocalVisitor {
         self.super_visit_function(func);
     }
 
-    fn visit_lvalue(&mut self, _place: &crate::bc::types::Place, _loc: Location) {
-        self.0.insert(_place.local);
+    fn visit_lvalue(&mut self, place: &crate::bc::types::Place, _loc: Location) {
+        self.0.insert(place.local);
     }
 
-    fn visit_rvalue_place(&mut self, _place: &crate::bc::types::Place, _loc: Location) {
-        self.0.insert(_place.local);
+    fn visit_rvalue_place(&mut self, place: &crate::bc::types::Place, _loc: Location) {
+        self.0.insert(place.local);
     }
 }
 
