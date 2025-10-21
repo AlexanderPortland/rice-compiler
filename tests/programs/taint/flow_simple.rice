@@ -1,0 +1,11 @@
+#[secure]
+fn secure() -> int {
+  0
+}
+
+fn main() {
+  let s = secure() in
+  if s == 10 {
+    println("s is 10!")
+  }
+}

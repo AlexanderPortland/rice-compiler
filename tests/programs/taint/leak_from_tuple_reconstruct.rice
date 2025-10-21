@@ -1,0 +1,15 @@
+#[secure]
+fn secure() -> (int, int) {
+  (0, 0)
+}
+
+fn id(x: (int, int)) -> (int, int) {
+  x
+}
+
+fn main() {
+  let p1 = secure() in
+  let p2 = p1 in
+  let p3 = id(p2) in
+  println(int_to_string(p3.0))
+}
