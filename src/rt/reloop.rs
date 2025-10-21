@@ -164,15 +164,18 @@ impl Relooper<'_> {
     ) {
         macro_rules! index {
             () => {
-                instr!(self).br(context
-                    .iter()
-                    .rev()
-                    .position(|ctx| match ctx {
-                        ContainingSyntax::BlockFollowedBy(l) => *l == dst,
-                        ContainingSyntax::LoopHeadedBy(l) => *l == dst,
-                        _ => false,
-                    })
-                    .unwrap() as u32)
+                instr!(self).br(u32::try_from(
+                    context
+                        .iter()
+                        .rev()
+                        .position(|ctx| match ctx {
+                            ContainingSyntax::BlockFollowedBy(l) => *l == dst,
+                            ContainingSyntax::LoopHeadedBy(l) => *l == dst,
+                            _ => false,
+                        })
+                        .unwrap(),
+                )
+                .unwrap())
             };
         }
         if self.rpo[&dst] <= self.rpo[&src] || self.merge_nodes.contains(&dst) {

@@ -32,6 +32,7 @@ pub fn analyze(_prog: &Program) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy)]
 pub struct OptimizeOptions {
     pub opt_level: OptLevel,
 }

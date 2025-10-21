@@ -4,7 +4,9 @@
     clippy::write_with_newline,
     clippy::new_without_default,
     clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
     clippy::unnecessary_wraps,
+    clippy::cast_precision_loss,
     rustdoc::private_intra_doc_links
 )]
 

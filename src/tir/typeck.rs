@@ -497,6 +497,7 @@ impl Tcx {
         self.loop_count -= 1;
     }
 
+    #[allow(clippy::too_many_lines)]
     fn check_expr(&mut self, expr: &ast::Expr) -> Result<Expr> {
         let (expr_t, ty) = match &expr.value {
             ast::ExprKind::Var(name) => {
@@ -1205,7 +1206,7 @@ mod inference {
             let b = self.normalize(b);
 
             match (a.kind(), b.kind()) {
-                (TypeKind::Hole(_), TypeKind::Hole(_)) | (TypeKind::Hole(_), _) => {
+                (TypeKind::Hole(_), _) => {
                     self.union(a, b);
                     Ok(())
                 }

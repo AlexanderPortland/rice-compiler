@@ -65,7 +65,12 @@ pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> Analys
     let mut state = IndexVec::from_elem(analysis.bottom(func), func.body.locations());
 
     // Create the list of instructions we must visit
-    let mut to_visit = VecDeque::from_iter(func.body.locations().iter().copied());
+    let mut to_visit = func
+        .body
+        .locations()
+        .iter()
+        .copied()
+        .collect::<VecDeque<_>>();
 
     while let Some(loc) = to_visit.pop_front() {
         let (flow_from, flow_to) = flow::<A>(func, loc);

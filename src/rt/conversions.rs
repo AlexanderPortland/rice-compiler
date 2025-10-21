@@ -157,7 +157,7 @@ impl Wasmable for () {
     }
 
     fn to_val(&self, rt: &Runtime, store: &mut StoreContextMut<'_, ()>) -> Result<Val> {
-        rt.alloc_tuple(store, vec![])
+        rt.alloc_tuple(store, &[])
     }
 }
 
@@ -227,7 +227,7 @@ macro_rules! gen_wasmable_tuple_impl {
         let fields = vec![
           $(self.$n.to_val(rt, &mut *store)?),*
         ];
-        rt.alloc_tuple(store, fields)
+        rt.alloc_tuple(store, &fields)
       }
     }
   };

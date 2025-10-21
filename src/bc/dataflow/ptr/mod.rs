@@ -55,7 +55,7 @@ impl PointerAnalysis {
             })
             .chain(arguments.iter().map(|(place, alloc)| alloc))
             .copied();
-        let domain = Arc::new(IndexedDomain::from_iter(new_allocs));
+        let domain = Arc::new(new_allocs.collect::<IndexedDomain<_>>());
 
         let points_to = self
             .points_to
@@ -69,7 +69,7 @@ impl PointerAnalysis {
                     MemLoc::Allocated(alloc, proj) => {
                         MemLoc::Allocated(Self::sub_alloc(&alloc, &arguments)?, proj)
                     }
-                    non_alloc => non_alloc,
+                    non_alloc @ MemLoc::Local(_) => non_alloc,
                 };
 
                 Ok((

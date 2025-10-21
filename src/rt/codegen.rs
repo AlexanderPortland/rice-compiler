@@ -137,7 +137,7 @@ impl CodegenModule<'_> {
         })
     }
 
-    fn convert_wasmtime_field_ty(&mut self, field: wasmtime::FieldType) -> FieldType {
+    fn convert_wasmtime_field_ty(&mut self, field: &wasmtime::FieldType) -> FieldType {
         FieldType {
             element_type: match field.element_type() {
                 wasmtime::StorageType::ValType(ty) => {
@@ -169,7 +169,7 @@ impl CodegenModule<'_> {
                     wasmtime::HeapType::ConcreteStruct(ty) => {
                         let fields = ty
                             .fields()
-                            .map(|field| self.convert_wasmtime_field_ty(field))
+                            .map(|field| self.convert_wasmtime_field_ty(&field))
                             .collect::<Box<[_]>>();
                         let idx = self.wasm_struct_ty_idx(StructType { fields });
                         HeapType::Concrete(idx)
@@ -443,7 +443,10 @@ impl CodegenFunc<'_, '_> {
             for elem in &p.projection[..p.projection.len() - 1] {
                 match elem {
                     bc::ProjectionElem::Field { index, ty } => {
-                        instrs.struct_get(self.module.tuple_ty_idx(*ty), *index as u32);
+                        instrs.struct_get(
+                            self.module.tuple_ty_idx(*ty),
+                            u32::try_from(*index).unwrap(),
+                        );
                     }
                     bc::ProjectionElem::Index { index, ty } => {
                         self.gen_operand(index, instrs);
@@ -455,7 +458,10 @@ impl CodegenFunc<'_, '_> {
             match p.projection.last().unwrap() {
                 bc::ProjectionElem::Field { index, ty } => {
                     self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
-                    instrs.struct_set(self.module.tuple_ty_idx(*ty), *index as u32);
+                    instrs.struct_set(
+                        self.module.tuple_ty_idx(*ty),
+                        u32::try_from(*index).unwrap(),
+                    );
                 }
                 bc::ProjectionElem::Index { index, ty } => {
                     self.gen_operand(index, instrs);
@@ -482,14 +488,14 @@ impl CodegenFunc<'_, '_> {
                     let offset = self.module.data_offset;
                     self.module.data.active(
                         0,
-                        &ConstExpr::i32_const(offset as i32),
+                        &ConstExpr::i32_const(i32::try_from(offset).unwrap()),
                         s.as_bytes().iter().copied(),
                     );
-                    self.module.data_offset += s.len() as u32;
+                    self.module.data_offset += u32::try_from(s.len()).unwrap();
 
                     instrs.struct_new(self.module.tuple_ty_idx(bc::Type::unit()));
-                    instrs.i32_const(offset as i32);
-                    instrs.i32_const(s.len() as i32);
+                    instrs.i32_const(i32::try_from(offset).unwrap());
+                    instrs.i32_const(i32::try_from(s.len()).unwrap());
                     let alloc_idx = self.module.func_name_to_code_idx[&Symbol::new("alloc_string")];
                     instrs.call(alloc_idx);
                 }
@@ -501,6 +507,7 @@ impl CodegenFunc<'_, '_> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn gen_rvalue(&mut self, rvalue: &bc::Rvalue, ty: bc::Type, instrs: &mut InstructionSink) {
         match rvalue {
             bc::Rvalue::Operand(op) => self.gen_operand(op, instrs),
@@ -678,7 +685,10 @@ impl CodegenFunc<'_, '_> {
         for elem in &place.projection {
             match elem {
                 bc::ProjectionElem::Field { index, ty } => {
-                    instrs.struct_get(self.module.tuple_ty_idx(*ty), *index as u32);
+                    instrs.struct_get(
+                        self.module.tuple_ty_idx(*ty),
+                        u32::try_from(*index).expect("shouldn't have numbers this big"),
+                    );
                 }
 
                 bc::ProjectionElem::Index { index, ty } => {

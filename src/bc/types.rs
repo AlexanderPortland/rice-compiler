@@ -597,6 +597,7 @@ impl Place {
         }))
     }
 
+    #[must_use]
     pub fn extend_projection(
         self,
         elems: impl IntoIterator<Item = ProjectionElem>,

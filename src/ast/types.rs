@@ -96,6 +96,7 @@ impl Type {
     }
 
     /// Substitute holes for types by running a function `f` on each hole.
+    #[must_use]
     pub fn subst(self, f: &mut impl FnMut(usize) -> Type) -> Type {
         match self.kind() {
             TypeKind::Int

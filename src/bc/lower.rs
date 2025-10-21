@@ -54,6 +54,7 @@ pub fn lower(tcx: &Tcx, prog: tir::Program) -> bc::Program {
     bc::Program::new(lowered_funcs)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn lower_func(tcx: &Tcx, func: tir::Function) -> bc::Function {
     // First, lower the TIR function into a CFG with potentially unused basic blocks.
     let mut lowerer = LowerBody::new(tcx, &func);
@@ -232,6 +233,7 @@ impl<'a> LowerBody<'a> {
         op.into_inner()
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lower_expr_into(&mut self, expr: &tir::Expr, op: WriteDst<'_>) {
         macro_rules! add_operand {
             ($op:expr) => {{
