@@ -101,7 +101,7 @@ impl Deref for Runtime {
     }
 }
 
-/// Workaround so we can use a ValType as a key in a hash map.
+/// Workaround so we can use a `ValType` as a key in a hash map.
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Clone, Hash)]
 struct ValTypeEq(ValType);
@@ -229,6 +229,7 @@ impl Runtime {
         Ok(rt)
     }
 
+    #[must_use]
     pub fn stats_string(&self) -> String {
         format!(
             "calls: {}, steps: {}",
@@ -877,7 +878,13 @@ impl Frame<'_> {
                     }};
                 }
 
-                use bc::{Binop::*, TypeKind::*};
+                use bc::{
+                    Binop::{
+                        Add, And, BitAnd, BitOr, Concat, Div, Eq, Exp, Ge, Gt, Le, Lt, Mul, Neq,
+                        Or, Rem, Shl, Shr, Sub,
+                    },
+                    TypeKind::{Bool, Float, Int, String},
+                };
                 match (op, lty.kind()) {
                     (Add, Int) => op!(i32, i32, i32::wrapping_add),
                     (Add, Float) => op!(f32, f32, f32::add),
@@ -955,8 +962,7 @@ impl Frame<'_> {
                         .collect::<Result<Vec<_>>>()?;
 
                     match (kind, loc) {
-                        (bc::AllocKind::Tuple, bc::AllocLoc::Heap)
-                        | (bc::AllocKind::Struct, bc::AllocLoc::Heap) => {
+                        (bc::AllocKind::Tuple | bc::AllocKind::Struct, bc::AllocLoc::Heap) => {
                             self.rt.alloc_tuple(store!(self), fields)?
                         }
                         (bc::AllocKind::Array, bc::AllocLoc::Heap) => {

@@ -54,7 +54,7 @@ impl PointerAnalysis {
                 Allocation::FromArg(_) => false,
             })
             .chain(arguments.iter().map(|(place, alloc)| alloc))
-            .cloned();
+            .copied();
         let domain = Arc::new(IndexedDomain::from_iter(new_allocs));
 
         let points_to = self
@@ -143,7 +143,7 @@ impl PointerAnalysis {
 /// The early stages of pointer analysis where we have subset and element constraints, but haven't
 /// fully constructed the points-to map yet.
 ///
-/// Use [InitialPointerAnalysis::finalize] to finish the analysis by computing that.
+/// Use [`InitialPointerAnalysis::finalize`] to finish the analysis by computing that.
 struct InitialPointerAnalysis {
     imaginary: Vec<Allocation>,
     /// `(a, p)` where `a` is in `p`
@@ -233,7 +233,7 @@ impl InitialPointerAnalysis {
     fn alloc_domain(&self) -> Arc<IndexedDomain<Allocation>> {
         let mut allocs = HashSet::new();
 
-        allocs.extend(self.imaginary.iter().cloned());
+        allocs.extend(self.imaginary.iter().copied());
         for (alloc, _) in &self.el_constraints {
             allocs.insert(*alloc);
         }

@@ -76,12 +76,12 @@ impl fmt::Display for ExprKind {
                 write_comma_separated(f, es)?;
                 write!(f, ")")
             }
-            ExprKind::Project { e, i } => write!(f, "{}.{}", e, i),
-            ExprKind::Index { e, i } => write!(f, "{}[{}]", e, i),
-            ExprKind::BinOp { left, right, op } => write!(f, "{} {} {}", left, op, right),
-            ExprKind::Cast { e, ty } => write!(f, "{} as {}", e, ty),
+            ExprKind::Project { e, i } => write!(f, "{e}.{i}"),
+            ExprKind::Index { e, i } => write!(f, "{e}[{i}]"),
+            ExprKind::BinOp { left, right, op } => write!(f, "{left} {op} {right}"),
+            ExprKind::Cast { e, ty } => write!(f, "{e} as {ty}"),
             ExprKind::Call { f: func, args } => {
-                write!(f, "{}(", func)?;
+                write!(f, "{func}(")?;
                 write_comma_separated(f, args)?;
                 write!(f, ")")
             }
@@ -104,19 +104,19 @@ impl fmt::Display for ExprKind {
                 write_params(f, params)?;
                 write!(f, ")+[")?;
                 write_params(f, env)?;
-                write!(f, "] -> {}. {}", ret_ty, body)
+                write!(f, "] -> {ret_ty}. {body}")
             }
             ExprKind::Closure { f: func, env } => {
-                write!(f, "closure({}, [", func)?;
+                write!(f, "closure({func}, [")?;
                 write_comma_separated(f, env)?;
                 write!(f, "])")
             }
-            ExprKind::Seq(e1, e2) => write!(f, "{};\n{}", e1, e2),
+            ExprKind::Seq(e1, e2) => write!(f, "{e1};\n{e2}"),
             ExprKind::Let { name, ty, e1, e2 } => {
-                write!(f, "let {}: {} = {} in\n{}", name, ty, e1, e2)
+                write!(f, "let {name}: {ty} = {e1} in\n{e2}")
             }
             ExprKind::Break => write!(f, "break"),
-            ExprKind::Return(e) => write!(f, "return {}", e),
+            ExprKind::Return(e) => write!(f, "return {e}"),
             ExprKind::If { cond, then_, else_ } => match else_ {
                 Some(else_expr) => write!(
                     f,
@@ -131,7 +131,7 @@ impl fmt::Display for ExprKind {
             ExprKind::While { cond, body } => {
                 write!(f, "while {} {{\n{}\n}}", cond, indent(format!("{body}")))
             }
-            ExprKind::Assign { dst, src } => write!(f, "{} = {}", dst, src),
+            ExprKind::Assign { dst, src } => write!(f, "{dst} = {src}"),
         }
     }
 }

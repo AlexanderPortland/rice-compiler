@@ -17,6 +17,7 @@ mod visit;
 pub use typeck::{Globals, Tcx};
 
 /// Type-checks a syntax tree into a [type context][Tcx] and a [typed program][Program].
+#[allow(clippy::needless_pass_by_value)]
 pub fn typecheck(prog: ast::Ast) -> Result<(Tcx, Program)> {
     let mut tcx = Tcx::new(prog.hole_count);
     let mut tir = tcx.check(&prog.prog)?;

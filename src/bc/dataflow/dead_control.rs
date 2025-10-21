@@ -40,14 +40,14 @@ pub fn remove_unused_blocks(func: &mut Function) -> bool {
             }
         }
 
-        if !changed {
-            // println!("did nothing for unused");
-            break 'done;
-        } else {
+        if changed {
             // println!("did SOMETHING for unused");
             // TODO: i dont think this is the right way to do this
             // as there's still a chance a change way down the tree could get lost
             func.body.regenerate_everything();
+        } else {
+            // println!("did nothing for unused");
+            break 'done;
         }
     }
 
@@ -104,7 +104,7 @@ pub fn skip_empty_blocks(func: &mut Function) -> bool {
                 }
             }
             _ => (),
-        };
+        }
 
         for removed_edge in removed_to {
             changed |= true;

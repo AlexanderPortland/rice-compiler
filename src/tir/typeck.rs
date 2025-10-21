@@ -167,7 +167,7 @@ pub struct TypeData {
 /// The global environment of the program.
 #[derive(Default)]
 pub struct Globals {
-    /// Map of functions. TypeData is used to track free variables in closures.
+    /// Map of functions. `TypeData` is used to track free variables in closures.
     pub funcs: HashMap<Symbol, Vec<TypeData>>,
 
     /// Map of struct definitions to the list of field types.
@@ -204,7 +204,7 @@ impl TypeConstraint {
     pub fn satisfied_by(self, ty: Type, span: Span, globals: &Globals) -> Result<()> {
         match self {
             TypeConstraint::Numeric => {
-                ensure!(ty.is_numeric(), TypeError::NonNumericType { ty, span })
+                ensure!(ty.is_numeric(), TypeError::NonNumericType { ty, span });
             }
             TypeConstraint::CastableTo(ty2) => match (ty.kind(), ty2.kind()) {
                 (TypeKind::Int, TypeKind::Float) => {}
@@ -228,7 +228,7 @@ impl TypeConstraint {
                     span,
                 }),
             },
-        };
+        }
         Ok(())
     }
 }
@@ -240,6 +240,7 @@ macro_rules! ensure_let {
 }
 
 impl Tcx {
+    #[must_use]
     pub fn new(hole_count: usize) -> Self {
         let mut tcx = Tcx {
             globals: Globals::default(),
@@ -338,7 +339,7 @@ impl Tcx {
             Item::Impl(impl_) => {
                 output.extend(self.check_impl(impl_)?);
             }
-        };
+        }
 
         Ok(())
     }
@@ -461,8 +462,8 @@ impl Tcx {
         ensure!(
             self.inference.unify(expected, actual).is_ok(),
             TypeError::TypeMismatch {
-                expected: self.inference.normalize(&expected),
-                actual: self.inference.normalize(&actual),
+                expected: self.inference.normalize(expected),
+                actual: self.inference.normalize(actual),
                 span,
             }
         );
@@ -478,7 +479,7 @@ impl Tcx {
 
     fn check_constraint(&self) -> Result<()> {
         for (constraint, ty, span) in &self.constraints {
-            constraint.satisfied_by(self.inference.normalize(ty), *span, &self.globals)?;
+            constraint.satisfied_by(self.inference.normalize(*ty), *span, &self.globals)?;
         }
         Ok(())
     }
@@ -711,15 +712,10 @@ impl Tcx {
 
                 let (receiver, intf, sig) = match receiver.ty.kind() {
                     TypeKind::Struct(struct_) => {
-                        let sig_search = self
-                            .globals
-                            .intfs
-                            .iter()
-                            .filter_map(|(intf, methods)| {
-                                let sig = methods.iter().find(|sig| sig.name.value == *method)?;
-                                Some((intf, sig))
-                            })
-                            .next();
+                        let sig_search = self.globals.intfs.iter().find_map(|(intf, methods)| {
+                            let sig = methods.iter().find(|sig| sig.name.value == *method)?;
+                            Some((intf, sig))
+                        });
                         ensure_let!(
                             Some((intf, sig)) = sig_search,
                             TypeError::MethodNotFound {
@@ -836,17 +832,14 @@ impl Tcx {
                 self.ty_equiv(Type::bool(), cond.ty, cond_span)?;
                 let then_ = self.check_expr(then_)?;
 
-                let (else_, ty) = match else_ {
-                    Some(else_expr) => {
-                        let else_ = self.check_expr(else_expr)?;
-                        self.ty_equiv(then_.ty, else_.ty, else_.span)?;
-                        (Some(Box::new(else_)), then_.ty)
-                    }
-                    None => {
-                        // If without else must have unit type in then branch
-                        self.ty_equiv(Type::unit(), then_.ty, then_.span)?;
-                        (None, Type::unit())
-                    }
+                let (else_, ty) = if let Some(else_expr) = else_ {
+                    let else_ = self.check_expr(else_expr)?;
+                    self.ty_equiv(then_.ty, else_.ty, else_.span)?;
+                    (Some(Box::new(else_)), then_.ty)
+                } else {
+                    // If without else must have unit type in then branch
+                    self.ty_equiv(Type::unit(), then_.ty, then_.span)?;
+                    (None, Type::unit())
                 };
 
                 (
@@ -1082,7 +1075,7 @@ mod inference {
     impl VisitMut for InferenceCtx {
         fn visit_type(&mut self, ty: &mut Type) {
             // replace only the holes
-            *ty = self.normalize(ty);
+            *ty = self.normalize(*ty);
         }
     }
 
@@ -1099,7 +1092,7 @@ mod inference {
                 for goal in &self.goals.clone() {
                     match goal {
                         Goal::Index { arr_ty, el_ty } => {
-                            let arr_ty = self.normalize(arr_ty);
+                            let arr_ty = self.normalize(*arr_ty);
                             match arr_ty.kind() {
                                 TypeKind::Hole(_) => remaining_goals.push(goal.clone()),
                                 TypeKind::Array(inner) => {
@@ -1116,7 +1109,7 @@ mod inference {
                             el_ty,
                             index,
                         } => {
-                            let tup_ty = self.normalize(tup_ty);
+                            let tup_ty = self.normalize(*tup_ty);
                             match tup_ty.kind() {
                                 TypeKind::Hole(_) => remaining_goals.push(goal.clone()),
                                 TypeKind::Tuple(inner_ty) => {
@@ -1141,7 +1134,7 @@ mod inference {
                             arg_tys,
                             ret_ty,
                         } => {
-                            let f_ty = self.normalize(f_ty);
+                            let f_ty = self.normalize(*f_ty);
                             match f_ty.kind() {
                                 TypeKind::Func { inputs, output } => {
                                     ensure!(
@@ -1193,7 +1186,7 @@ mod inference {
             // check for remaining holes
             for ty in self.types.keys().sorted().filter(|a| a.is_hole()) {
                 if let TypeKind::Hole(_hole) = ty.kind() {
-                    let resolve = self.normalize(ty);
+                    let resolve = self.normalize(*ty);
 
                     ensure!(
                         !resolve.is_hole(),
@@ -1208,13 +1201,18 @@ mod inference {
         }
 
         pub fn unify(&mut self, a: Type, b: Type) -> Result<()> {
-            let a = self.normalize(&a);
-            let b = self.normalize(&b);
+            let a = self.normalize(a);
+            let b = self.normalize(b);
 
             match (a.kind(), b.kind()) {
-                (TypeKind::Hole(_hole_a), TypeKind::Hole(_hole_b)) => self.union(a, b),
-                (TypeKind::Hole(_hole), _known) => self.union(a, b),
-                (_known, TypeKind::Hole(_hole)) => self.union(b, a),
+                (TypeKind::Hole(_), TypeKind::Hole(_)) | (TypeKind::Hole(_), _) => {
+                    self.union(a, b);
+                    Ok(())
+                }
+                (_known, TypeKind::Hole(_hole)) => {
+                    self.union(b, a);
+                    Ok(())
+                }
                 (TypeKind::Array(a1), TypeKind::Array(a2)) => self.unify(*a1, *a2),
                 (TypeKind::Tuple(t1), TypeKind::Tuple(t2)) => {
                     ensure!(t1.len() == t2.len(), InferenceError::Mismatch);
@@ -1232,7 +1230,7 @@ mod inference {
             }
         }
 
-        pub fn normalize(&self, ty: &Type) -> Type {
+        pub fn normalize(&self, ty: Type) -> Type {
             // println!("normalizing {ty:?}");
             // replace each hole using the helper they provide...
             let mut replace_hole = |hole| self.replace_or_keep_as_hole(hole);
@@ -1273,9 +1271,7 @@ mod inference {
         }
 
         /// Unions two types to be equal. If only one is a hole, the hole should be on the left.
-        fn union(&mut self, a: Type, b: Type) -> Result<()> {
-            // println!("union {a:?} and {b:?}");
-
+        fn union(&mut self, a: Type, b: Type) {
             match (a.is_hole(), b.is_hole()) {
                 (false, true) => panic!("illegal use"),
                 (false, false) => panic!("illegal use 2"),
@@ -1286,12 +1282,10 @@ mod inference {
             let rep_b = self.rep_or_insert(b);
 
             match (rep_a.is_hole(), rep_b.is_hole()) {
-                (true, true) | (true, false) => self.types.insert(rep_a, Some(rep_b)),
+                (true, true | false) => self.types.insert(rep_a, Some(rep_b)),
                 (false, true) => self.types.insert(rep_b, Some(rep_a)),
                 (false, false) => panic!("dont want ot handl ethis yet"),
             };
-
-            Ok(())
         }
     }
 }

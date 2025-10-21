@@ -1,10 +1,11 @@
+#![deny(warnings)]
+#![warn(clippy::pedantic)]
 #![allow(
     clippy::write_with_newline,
     clippy::new_without_default,
+    clippy::missing_errors_doc,
     rustdoc::private_intra_doc_links
 )]
-#![deny(warnings)]
-#![warn(clippy::pedantic)]
 
 use lalrpop_util::lalrpop_mod;
 

@@ -102,7 +102,7 @@ impl Wasmable for bool {
     }
 
     fn to_val(&self, _rt: &Runtime, _store: &mut StoreContextMut<'_, ()>) -> Result<Val> {
-        let n = if *self { 1 } else { 0 };
+        let n = i32::from(*self);
         Ok(Val::I32(n))
     }
 }

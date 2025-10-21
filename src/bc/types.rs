@@ -26,10 +26,12 @@ pub use crate::tir::types::{Binop, Const, Type, TypeKind};
 pub struct Program(Vec<Function>);
 
 impl Program {
+    #[must_use]
     pub fn new(funcs: Vec<Function>) -> Self {
         Program(funcs)
     }
 
+    #[must_use]
     pub fn functions(&self) -> &[Function] {
         &self.0
     }
@@ -38,6 +40,7 @@ impl Program {
         &mut self.0
     }
 
+    #[must_use]
     pub fn into_functions(self) -> Vec<Function> {
         self.0
     }
@@ -88,11 +91,13 @@ impl Function {
     }
 
     /// Returns true if the function is annotated with `#[jit]`.
+    #[must_use]
     pub fn jit(&self) -> bool {
         self.annots.iter().any(|annot| annot.name == "jit")
     }
 
     /// Returns true if the function is annotated with `#[secure]`.
+    #[must_use]
     pub fn secure(&self) -> bool {
         self.annots.iter().any(|annot| annot.name == "secure")
     }
@@ -124,8 +129,8 @@ impl Body {
 
         Body {
             cfg,
-            rpo,
             locations,
+            rpo,
         }
     }
 
@@ -199,6 +204,7 @@ impl Body {
     }
 
     /// Returns the data corresponding to the given basic block.
+    #[must_use]
     pub fn data(&self, node: BasicBlockIdx) -> &BasicBlock {
         self.cfg.node_weight(node.into()).unwrap()
     }
@@ -211,11 +217,13 @@ impl Body {
     /// Returns an iterator over basic block indices.
     ///
     /// Guaranteed to be a reverse-postorder.
+    #[must_use]
     pub fn blocks(&self) -> impl DoubleEndedIterator<Item = BasicBlockIdx> {
         self.rpo.iter().copied()
     }
 
     /// Returns the underlying CFG.
+    #[must_use]
     pub fn cfg(&self) -> &Cfg {
         &self.cfg
     }
@@ -226,11 +234,13 @@ impl Body {
     }
 
     /// Returns the location domain.
+    #[must_use]
     pub fn locations(&self) -> &Arc<IndexedDomain<Location>> {
         &self.locations
     }
 
     /// Returns the instruction at a given location.
+    #[must_use]
     pub fn instr(&self, loc: Location) -> Either<&Statement, &Terminator> {
         self.data(loc.block).get(loc.instr)
     }
@@ -241,6 +251,7 @@ impl Body {
     }
 
     /// Returns all locations which can possibly come after the given location.
+    #[must_use]
     pub fn successors(&self, loc: Location) -> SmallVec<[Location; 2]> {
         if loc.instr == self.data(loc.block).terminator_index() {
             self.cfg
@@ -259,6 +270,7 @@ impl Body {
     }
 
     /// Returns all locations which can possibly come before the given location.
+    #[must_use]
     pub fn predecessors(&self, loc: Location) -> SmallVec<[Location; 2]> {
         if loc.instr == 0 {
             self.cfg
@@ -284,6 +296,7 @@ index_vec::define_index_type! {
 
 impl BasicBlockIdx {
     /// Returns the location of the first instruction in the basic block.
+    #[must_use]
     pub fn entry(self) -> Location {
         Location {
             block: self,
@@ -338,6 +351,7 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     /// Get the ith instruction in the basic block.
+    #[must_use]
     pub fn get(&self, i: usize) -> Either<&Statement, &Terminator> {
         assert!(i <= self.statements.len());
         if i == self.statements.len() {
@@ -357,6 +371,7 @@ impl BasicBlock {
         }
     }
 
+    #[must_use]
     pub fn terminator_index(&self) -> usize {
         self.statements.len()
     }
@@ -384,6 +399,7 @@ pub enum Operand {
 }
 
 impl Operand {
+    #[must_use]
     pub fn ty(&self) -> Type {
         match self {
             Operand::Place(p) => p.ty,
@@ -392,6 +408,7 @@ impl Operand {
         }
     }
 
+    #[must_use]
     pub fn as_place(&self) -> Option<Place> {
         match self {
             Operand::Place(p) => Some(*p),
@@ -479,23 +496,24 @@ pub enum Rvalue {
 
 impl Rvalue {
     /// Returns a vector of all the places used in the rvalue.
+    #[must_use]
     pub fn places(&self) -> SmallVec<[Place; 2]> {
         match self {
             Rvalue::Operand(op) | Rvalue::Cast { op, .. } => op.as_place().into_iter().collect(),
             Rvalue::Alloc { args, .. } => match args {
-                AllocArgs::Lit(ops) => ops.iter().flat_map(|op| op.as_place()).collect(),
+                AllocArgs::Lit(ops) => ops.iter().filter_map(Operand::as_place).collect(),
                 AllocArgs::Repeated { op, count } => vec![op.as_place(), count.as_place()]
                     .into_iter()
                     .flatten()
                     .collect(),
             },
             Rvalue::Call { args: ops, .. } | Rvalue::Closure { env: ops, .. } => {
-                ops.iter().filter_map(|op| op.as_place()).collect()
+                ops.iter().filter_map(Operand::as_place).collect()
             }
             Rvalue::MethodCall { receiver, args, .. } => args
                 .iter()
                 .chain([receiver])
-                .filter_map(|op| op.as_place())
+                .filter_map(Operand::as_place)
                 .collect(),
             Rvalue::Binop { left, right, .. } => left
                 .as_place()
@@ -514,6 +532,7 @@ pub struct Terminator {
 }
 
 impl Terminator {
+    #[must_use]
     pub fn kind(&self) -> &TerminatorKind {
         &self.kind
     }
@@ -569,6 +588,7 @@ pub struct PlaceData {
 interned!(Place, PlaceData);
 
 impl Place {
+    #[must_use]
     pub fn new(local: LocalIdx, projection: Vec<ProjectionElem>, ty: Type) -> Self {
         Place(Intern::new(PlaceData {
             local,

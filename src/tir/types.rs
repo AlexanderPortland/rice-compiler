@@ -17,6 +17,7 @@ pub struct Function {
 }
 
 impl Function {
+    #[must_use]
     pub fn ty(&self) -> Type {
         Type::func(self.params.iter().map(|(_, ty)| *ty).collect(), self.ret_ty)
     }
@@ -116,10 +117,12 @@ pub struct Expr {
 pub struct Program(Vec<Function>);
 
 impl Program {
+    #[must_use]
     pub fn new(funcs: Vec<Function>) -> Self {
         Program(funcs)
     }
 
+    #[must_use]
     pub fn functions(&self) -> &[Function] {
         &self.0
     }
@@ -128,6 +131,7 @@ impl Program {
         &mut self.0
     }
 
+    #[must_use]
     pub fn into_functions(self) -> Vec<Function> {
         self.0
     }

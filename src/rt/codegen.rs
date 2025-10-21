@@ -242,28 +242,26 @@ impl CodegenModule<'_> {
     }
 
     fn wasm_struct_ty_idx(&mut self, ty: StructType) -> u32 {
-        match self.struct_ty_idx.get(&ty) {
-            Some(idx) => *idx,
-            None => {
-                self.types.ty().struct_(ty.fields.clone());
-                let idx = self.types.len() - 1;
-                self.struct_ty_idx.insert(ty, idx);
-                idx
-            }
+        if let Some(idx) = self.struct_ty_idx.get(&ty) {
+            *idx
+        } else {
+            self.types.ty().struct_(ty.fields.clone());
+            let idx = self.types.len() - 1;
+            self.struct_ty_idx.insert(ty, idx);
+            idx
         }
     }
 
     fn wasm_array_ty_idx(&mut self, ty: StorageType) -> u32 {
-        match self.array_ty_idx.get(&ty) {
-            Some(idx) => *idx,
-            None => {
-                self.types
-                    .ty()
-                    .array(&ty, true /* structs mutable by default */);
-                let idx = self.types.len() - 1;
-                self.array_ty_idx.insert(ty, idx);
-                idx
-            }
+        if let Some(idx) = self.array_ty_idx.get(&ty) {
+            *idx
+        } else {
+            self.types
+                .ty()
+                .array(&ty, true /* structs mutable by default */);
+            let idx = self.types.len() - 1;
+            self.array_ty_idx.insert(ty, idx);
+            idx
         }
     }
 
@@ -402,7 +400,7 @@ impl CodegenFunc<'_, '_> {
             .input_func
             .body
             .cfg()
-            .map(|_, block| self.gen_block(block), |_, _| ());
+            .map(|_, block| self.gen_block(block), |_, ()| ());
         let return_type = self.module.gen_ty(self.input_func.ret_ty);
         reloop::reloop(&mut self.output_func, wasm_cfg, return_type);
         self.output_func.instructions().end();
@@ -472,7 +470,7 @@ impl CodegenFunc<'_, '_> {
         match op {
             bc::Operand::Const(c) => match c {
                 bc::Const::Bool(b) => {
-                    instrs.i32_const(if *b { 1 } else { 0 });
+                    instrs.i32_const(i32::from(*b));
                 }
                 bc::Const::Int(n) => {
                     instrs.i32_const(*n);
@@ -498,7 +496,7 @@ impl CodegenFunc<'_, '_> {
             },
             bc::Operand::Place(p) => self.gen_load(*p, instrs),
             bc::Operand::Func { f, ty } => {
-                self.gen_rvalue(&bc::Rvalue::Closure { f: *f, env: vec![] }, *ty, instrs)
+                self.gen_rvalue(&bc::Rvalue::Closure { f: *f, env: vec![] }, *ty, instrs);
             }
         }
     }
@@ -508,7 +506,13 @@ impl CodegenFunc<'_, '_> {
             bc::Rvalue::Operand(op) => self.gen_operand(op, instrs),
 
             bc::Rvalue::Binop { op, left, right } => {
-                use bc::{Binop::*, TypeKind::*};
+                use bc::{
+                    Binop::{
+                        Add, And, BitAnd, BitOr, Concat, Div, Eq, Ge, Gt, Le, Lt, Mul, Neq, Or,
+                        Rem, Shl, Shr, Sub,
+                    },
+                    TypeKind::{Float, Int, String},
+                };
 
                 // Special case this because we need to add the empty environment when calling a function.
                 if matches!(op, Concat) {
@@ -568,7 +572,7 @@ impl CodegenFunc<'_, '_> {
 
             bc::Rvalue::Alloc { kind, args, loc } => match args {
                 bc::AllocArgs::Lit(ops) => {
-                    for el in ops.iter() {
+                    for el in ops {
                         self.gen_operand(el, instrs);
                     }
 
@@ -627,7 +631,11 @@ impl CodegenFunc<'_, '_> {
                         kind: bc::AllocKind::Tuple,
                         loc: bc::AllocLoc::Heap,
                     },
-                    bc::Type::tuple(env.iter().map(|op| op.ty()).collect()),
+                    bc::Type::tuple(
+                        env.iter()
+                            .map(super::super::bc::types::Operand::ty)
+                            .collect(),
+                    ),
                     instrs,
                 );
 

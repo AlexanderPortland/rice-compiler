@@ -86,16 +86,19 @@ pub struct Input {
 }
 
 impl Input {
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// View the source file as a Miette [`SourceCode`] for getting eg line info.
+    #[must_use]
     pub fn as_source(&self) -> impl SourceCode {
         self.contents.as_str()
     }
 
     /// Transform into a Miette [`NamedSource`] for diagnostic reporting.
+    #[must_use]
     pub fn into_named_source(self) -> NamedSource<String> {
         let file_name = self.path.file_name().unwrap().to_string_lossy().to_string();
         NamedSource::new(file_name, self.contents)

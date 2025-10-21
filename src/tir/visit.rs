@@ -1,6 +1,6 @@
 //! Visitor trait for the TIR.
 
-use crate::tir::types::*;
+use crate::tir::types::{Expr, ExprKind, Function, Program, Type};
 
 pub trait VisitMut {
     fn visit_program(&mut self, prog: &mut Program) {
@@ -41,12 +41,7 @@ pub trait VisitMut {
                 self.visit_texpr(&mut *e);
                 self.visit_type(ty);
             }
-            ExprKind::Tuple(es) => {
-                for e in es {
-                    self.visit_texpr(e);
-                }
-            }
-            ExprKind::Array(es) => {
+            ExprKind::Tuple(es) | ExprKind::Array(es) | ExprKind::Struct(es) => {
                 for e in es {
                     self.visit_texpr(e);
                 }
@@ -54,14 +49,6 @@ pub trait VisitMut {
             ExprKind::ArrayCopy { val, count } => {
                 self.visit_texpr(&mut *val);
                 self.visit_texpr(&mut *count);
-            }
-            ExprKind::Struct(es) => {
-                for e in es {
-                    self.visit_texpr(e);
-                }
-            }
-            ExprKind::Project { e, .. } => {
-                self.visit_texpr(&mut *e);
             }
             ExprKind::Index { e, i } => {
                 self.visit_texpr(&mut *e);
@@ -108,7 +95,7 @@ pub trait VisitMut {
                 self.visit_texpr(&mut *e1);
                 self.visit_texpr(&mut *e2);
             }
-            ExprKind::Return(e) => {
+            ExprKind::Project { e, .. } | ExprKind::Return(e) => {
                 self.visit_texpr(&mut *e);
             }
             ExprKind::If { cond, then_, else_ } => {

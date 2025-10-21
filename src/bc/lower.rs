@@ -267,7 +267,7 @@ impl<'a> LowerBody<'a> {
 
             tir::ExprKind::Cast { e, ty } => {
                 let e_op = self.lower_expr_into_tmp(e);
-                add_assign!(bc::Rvalue::Cast { op: e_op, ty: *ty })
+                add_assign!(bc::Rvalue::Cast { op: e_op, ty: *ty });
             }
 
             tir::ExprKind::If { cond, then_, else_ } => {
@@ -339,11 +339,7 @@ impl<'a> LowerBody<'a> {
                 let header_block = self.new_block();
                 let footer_block = self.new_block();
 
-                log::debug!(
-                    "looping w/ header {:?} and footer {:?}",
-                    header_block,
-                    footer_block
-                );
+                log::debug!("looping w/ header {header_block:?} and footer {footer_block:?}");
 
                 self.finish_block(
                     header_block,
@@ -387,7 +383,7 @@ impl<'a> LowerBody<'a> {
 
             tir::ExprKind::Var(name) => {
                 let local = self.get_local(*name, expr.ty);
-                add_operand!(bc::Operand::Place(bc::Place::new(local, vec![], expr.ty)))
+                add_operand!(bc::Operand::Place(bc::Place::new(local, vec![], expr.ty)));
             }
 
             tir::ExprKind::Tuple(els) => {
@@ -424,7 +420,7 @@ impl<'a> LowerBody<'a> {
                     kind: AllocKind::Array,
                     loc: AllocLoc::Heap,
                     args: AllocArgs::Repeated { op: val, count }
-                })
+                });
             }
 
             tir::ExprKind::Struct(els) => {
@@ -450,7 +446,7 @@ impl<'a> LowerBody<'a> {
                     }],
                     expr.ty,
                 );
-                add_assign!(bc::Rvalue::Operand(bc::Operand::Place(projected)))
+                add_assign!(bc::Rvalue::Operand(bc::Operand::Place(projected)));
             }
 
             tir::ExprKind::Index { e, i } => {
@@ -466,7 +462,7 @@ impl<'a> LowerBody<'a> {
                     e.ty,
                 );
 
-                add_assign!(bc::Rvalue::Operand(bc::Operand::Place(projected)))
+                add_assign!(bc::Rvalue::Operand(bc::Operand::Place(projected)));
             }
 
             tir::ExprKind::Call { f, args } => {
@@ -496,12 +492,12 @@ impl<'a> LowerBody<'a> {
                     receiver: receiver_place,
                     method: method_idx,
                     args
-                })
+                });
             }
 
             tir::ExprKind::Closure { f, env } => {
                 let env = env.iter().map(|e| self.lower_expr_into_tmp(e)).collect();
-                add_assign!(bc::Rvalue::Closure { f: *f, env })
+                add_assign!(bc::Rvalue::Closure { f: *f, env });
             }
 
             tir::ExprKind::Seq(e1, e2) => {
@@ -529,7 +525,7 @@ impl<'a> LowerBody<'a> {
                     kind: AllocKind::Tuple,
                     loc: AllocLoc::Heap,
                     args: AllocArgs::Lit(Vec::new())
-                })
+                });
             }
 
             tir::ExprKind::While { .. } => {

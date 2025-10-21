@@ -12,7 +12,7 @@ pub fn write_comma_separated<T: fmt::Display>(
         if i > 0 {
             write!(f, ", ")?;
         }
-        write!(f, "{}", item)?;
+        write!(f, "{item}")?;
     }
     Ok(())
 }
@@ -25,7 +25,7 @@ pub fn write_newline_separated<T: fmt::Display>(
         if i > 0 {
             write!(f, "\n")?;
         }
-        write!(f, "{}", item)?;
+        write!(f, "{item}")?;
     }
     Ok(())
 }
@@ -58,6 +58,7 @@ impl Symbol {
         Symbol(internment::Intern::from_ref(s.as_ref()))
     }
 
+    #[must_use]
     pub fn main() -> Self {
         static MAIN: LazyLock<Symbol> = LazyLock::new(|| sym("main"));
         *MAIN

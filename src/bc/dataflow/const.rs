@@ -11,7 +11,7 @@ use crate::{
     rt,
     utils::Symbol,
 };
-use core::ops::*;
+use core::ops::{Add, Div, Fn, Mul, RangeBounds, Sub};
 use indexical::{
     ArcIndexSet, ArcIndexVec, RcIndexSet, ToIndex, pointer::PointerFamily, vec::IndexVec,
 };
@@ -50,7 +50,7 @@ impl VisitMut for ConstProp<'_> {
             && let ConstInfo::Const(c) = self.info.get(loc).get(p.local).clone()
         {
             self.any_change |= true;
-            *operand = Operand::Const(c)
+            *operand = Operand::Const(c);
         }
         self.super_visit_operand(operand, loc);
     }
@@ -104,9 +104,7 @@ impl VisitMut for ConstProp<'_> {
                     .find_edge(block.into(), never_jump_to.into())
                     .expect("there should be an edge here...");
                 let rem = body.cfg_mut().remove_edge(edge_index);
-                if rem.is_none() {
-                    panic!("ahhhh");
-                }
+                assert!(rem.is_some(), "ahhhh");
             }
         }
 
@@ -126,7 +124,9 @@ impl VisitMut for ConstProp<'_> {
             && let ConstInfo::Closure(closure_symbol) = self.info.get(loc).get(p_fun.local).clone()
         {
             let fn_ty = Type::func(
-                args.iter().map(|a| a.ty()).collect::<Vec<_>>(),
+                args.iter()
+                    .map(super::super::types::Operand::ty)
+                    .collect::<Vec<_>>(),
                 stmt.place.ty,
             );
             stmt.rvalue = Rvalue::Call {
@@ -185,11 +185,11 @@ impl JoinSemiLattice for ArcIndexVec<Local, ConstInfo> {
             match (*my_info).partial_cmp(new_info) {
                 Some(std::cmp::Ordering::Less) => {
                     changed |= true;
-                    *my_info = new_info.clone()
+                    *my_info = new_info.clone();
                 }
                 None => {
                     changed |= true;
-                    *my_info = ConstInfo::Variable
+                    *my_info = ConstInfo::Variable;
                 }
                 _ => (),
             }
@@ -265,9 +265,7 @@ impl ConstAnalysis {
             _ => return None,
         };
 
-        if right.ty() != left.ty() {
-            panic!("weird typing shit");
-        }
+        assert!(right.ty() == left.ty(), "weird typing shit");
 
         let new_const = match (left, right) {
             (Const::Bool(left), Const::Bool(right)) => Const::Bool(match op {

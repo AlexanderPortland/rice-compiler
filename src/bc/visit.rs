@@ -5,7 +5,10 @@
 use either::Either;
 use itertools::Itertools;
 
-use crate::bc::types::*;
+use crate::bc::types::{
+    AllocArgs, BasicBlock, BasicBlockIdx, Body, Function, Location, Operand, Place, Program,
+    ProjectionElem, Rvalue, Statement, Terminator, TerminatorKind,
+};
 
 pub trait Visit {
     fn visit_program(&mut self, prog: &Program) {
@@ -168,7 +171,7 @@ pub trait VisitMut {
 
     fn super_visit_basic_block(&mut self, data: &mut BasicBlock, block: BasicBlockIdx) {
         for (instr, statement) in data.statements.iter_mut().enumerate() {
-            self.visit_statement(statement, Location { block, instr })
+            self.visit_statement(statement, Location { block, instr });
         }
 
         let term_loc = Location {

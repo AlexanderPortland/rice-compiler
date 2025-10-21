@@ -64,7 +64,7 @@ fn read_file(path: &str) -> Result<String, String> {
 
 fn nth_char(s: &str, i: i32) -> String {
     let i = i as usize;
-    s[i..i + 1].to_string()
+    s[i..=i].to_string()
 }
 
 fn log(x: f32) -> f32 {
@@ -79,6 +79,7 @@ fn sigmoid(x: f32) -> f32 {
     1. / (1. + (-x).exp())
 }
 
+#[must_use]
 pub fn stdlib() -> &'static HashMap<Symbol, Box<dyn rt::WasmFunc>> {
     macro_rules! stdlib {
         ($(($func:ident, $tys:ty)),*) => {
