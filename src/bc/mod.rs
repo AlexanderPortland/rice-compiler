@@ -14,6 +14,7 @@ use dataflow::dead_code::eliminate_dead_code;
 mod dataflow;
 mod lower;
 mod print;
+mod taint;
 pub mod types;
 mod visit;
 
@@ -28,8 +29,8 @@ pub enum OptLevel {
 }
 
 /// Run correctness analyses on the whole program.
-pub fn analyze(_prog: &Program) -> Result<()> {
-    Ok(())
+pub fn analyze(prog: &Program) -> Result<()> {
+    taint::check_taints(prog)
 }
 
 #[derive(Clone, Copy)]
