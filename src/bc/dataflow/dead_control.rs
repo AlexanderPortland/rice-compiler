@@ -7,8 +7,8 @@ use crate::bc::{
     dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
     print,
     types::{
-        BasicBlockIdx, Function, Local, LocalIdx, Location, Operand, Place, Rvalue, Statement,
-        TerminatorKind,
+        BasicBlockIdx, Function, Local, LocalIdx, Location, Operand, Place, ProjectionElem, Rvalue,
+        Statement, TerminatorKind,
     },
     visit::{Visit, VisitMut},
 };
@@ -342,6 +342,25 @@ struct LocalUpdater<'z>(&'z dyn Fn(LocalIdx) -> LocalIdx);
 
 impl VisitMut for LocalUpdater<'_> {
     fn visit_place(&mut self, place: &mut crate::bc::types::Place, loc: Location) {
-        *place = Place::new(self.0(place.local), place.projection.clone(), place.ty);
+        let new_local = self.0(place.local);
+
+        let new_proj = place
+            .projection
+            .iter()
+            .cloned()
+            .map(|mut proj| {
+                if let ProjectionElem::Index {
+                    index: Operand::Place(index_place),
+                    ty,
+                } = &mut proj
+                {
+                    self.visit_place(index_place, loc);
+                }
+
+                proj
+            })
+            .collect::<Vec<_>>();
+
+        *place = Place::new(new_local, new_proj, place.ty);
     }
 }
