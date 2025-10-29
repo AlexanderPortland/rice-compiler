@@ -1,9 +1,0 @@
-#[secure]
-fn secure() -> (int, int) {
-  (0, 0)
-}
-
-fn main() {
-  let p1 = secure() in
-  println(int_to_string(p1.0))
-}

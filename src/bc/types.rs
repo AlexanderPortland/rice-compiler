@@ -433,6 +433,21 @@ impl Operand {
         }
     }
 
+    pub fn places(&self) -> Option<Vec<Place>> {
+        self.as_place().map(|place| {
+            {
+                [place].into_iter().chain(
+                    place
+                        .projection
+                        .iter()
+                        .flat_map(ProjectionElem::places)
+                        .flatten(),
+                )
+            }
+            .collect()
+        })
+    }
+
     #[must_use]
     pub fn as_place(&self) -> Option<Place> {
         match self {
@@ -524,26 +539,32 @@ impl Rvalue {
     #[must_use]
     pub fn places(&self) -> SmallVec<[Place; 2]> {
         match self {
-            Rvalue::Operand(op) | Rvalue::Cast { op, .. } => op.as_place().into_iter().collect(),
+            Rvalue::Operand(op) | Rvalue::Cast { op, .. } => {
+                op.places().into_iter().flatten().collect()
+            }
             Rvalue::Alloc { args, .. } => match args {
-                AllocArgs::Lit(ops) => ops.iter().filter_map(Operand::as_place).collect(),
-                AllocArgs::Repeated { op, count } => vec![op.as_place(), count.as_place()]
+                AllocArgs::Lit(ops) => ops.iter().filter_map(Operand::places).flatten().collect(),
+                AllocArgs::Repeated { op, count } => op
+                    .places()
                     .into_iter()
+                    .chain(count.places().into_iter())
                     .flatten()
                     .collect(),
             },
             Rvalue::Call { args: ops, .. } | Rvalue::Closure { env: ops, .. } => {
-                ops.iter().filter_map(Operand::as_place).collect()
+                ops.iter().filter_map(Operand::places).flatten().collect()
             }
             Rvalue::MethodCall { receiver, args, .. } => args
                 .iter()
                 .chain([receiver])
-                .filter_map(Operand::as_place)
+                .filter_map(Operand::places)
+                .flatten()
                 .collect(),
             Rvalue::Binop { left, right, .. } => left
-                .as_place()
+                .places()
                 .into_iter()
-                .chain(right.as_place())
+                .chain(right.places().into_iter())
+                .flatten()
                 .collect(),
         }
     }
@@ -651,4 +672,13 @@ pub enum ProjectionElem {
 
     /// Index into a fixed-size array.
     Index { index: Operand, ty: Type },
+}
+
+impl ProjectionElem {
+    pub fn places(&self) -> Option<Vec<Place>> {
+        match self {
+            Self::Field { index, ty } => None,
+            Self::Index { index, ty } => index.places(),
+        }
+    }
 }
