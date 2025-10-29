@@ -1,5 +1,3 @@
-// yo
-
 #[secure]
 fn secure() -> int {
   0 
