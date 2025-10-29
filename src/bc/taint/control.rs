@@ -2,13 +2,26 @@ use std::collections::{HashMap, HashSet};
 
 use crate::bc::types::{BasicBlock, BasicBlockIdx, Body, Function, TerminatorKind};
 use itertools::Itertools;
-use petgraph::{Graph, algo::dominators::Dominators, prelude::NodeIndex};
+use petgraph::visit::NodeRef;
+use petgraph::{Graph, algo::dominators::Dominators, prelude::NodeIndex, visit::EdgeRef};
 
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct ControlDependencies(Graph<BasicBlockIdx, ()>);
 
 impl ControlDependencies {
+    /// Iterator over all the nodes this one is control dependent on.
+    pub fn cdep_on(&self, block: BasicBlockIdx) -> impl Iterator<Item = BasicBlockIdx> {
+        println!("cdep on {block}");
+        self.0
+            .edges_directed(block.into(), petgraph::Direction::Outgoing)
+            .flat_map(|edge| {
+                let a = edge.target().id().into();
+                println!("edge to {a}");
+                self.cdep_on(a).chain([a]).collect::<Vec<_>>().into_iter()
+            })
+    }
+
     fn from_map(map: HashMap<NodeIndex, HashSet<NodeIndex>>, body: &Body) -> Self {
         let mut g = Graph::new();
         for i in body.blocks() {
@@ -24,18 +37,14 @@ impl ControlDependencies {
         ControlDependencies(g)
     }
 
-    fn from_post_dominators<'a>(
+    fn from_post_dominators(
         pdom: Dominators<NodeIndex>,
         reverse_cfg: &Graph<BlockKind, ()>,
-        // return_block_idx: &NodeIndex,
         body: &Body,
     ) -> Self {
-        // let a = reverse_post_order(g, entry)
-
         // The blocks a given block is cdep ON.
         let mut cdep: HashMap<NodeIndex, HashSet<NodeIndex>> = HashMap::new();
 
-        // TODO: should maybe have an order thing here...
         for x in body.blocks() {
             let x = x.into();
             for goes_to_me in reverse_cfg.neighbors_directed(x, petgraph::Outgoing) {
@@ -44,43 +53,26 @@ impl ControlDependencies {
                     .expect("should have pdom")
                     .contains(&x)
                 {
-                    // let goes_to_me = reverse_cfg[goes_to_me]
-                    //     .block_idx()
-                    //     .expect("should have idx");
-                    println!("{x:?} cdep on {goes_to_me:?} -- by direct");
-                    cdep.entry(x.into()).or_default().insert(goes_to_me);
+                    // println!("{x:?} cdep on {goes_to_me:?} -- by direct");
+                    cdep.entry(x).or_default().insert(goes_to_me);
                 }
 
                 for z in pdom.immediately_dominated_by(x) {
-                    println!("\t{z:?} is immediately pdom by {x:?}");
+                    // println!("\t{z:?} is immediately pdom by {x:?}");
                     for y in cdep.get(&z).unwrap_or(&HashSet::new()).clone() {
-                        println!("\t\twhich is cdep on {y:?}");
+                        // println!("\t\twhich is cdep on {y:?}");
                         if !pdom
                             .dominators(y)
                             .expect("should have dominators")
                             .contains(&x)
                         {
-                            println!("{x:?} cdep on {y:?} -- by way of {z:?}");
-                            cdep.entry(x.into()).or_default().insert(y);
+                            // println!("{x:?} cdep on {y:?} -- by way of {z:?}");
+                            cdep.entry(x).or_default().insert(y);
                         }
                     }
                 }
             }
         }
-
-        // let bb_from_idx = |idx: NodeIndex| BasicBlockIdx::from(idx);
-
-        // let cdep = cdep
-        //     .into_iter()
-        //     .map(|(key_idx, val)| {
-        //         (
-        //             bb_from_idx(key_idx),
-        //             val.into_iter()
-        //                 .map(|val_idx| bb_from_idx(val_idx))
-        //                 .collect(),
-        //         )
-        //     })
-        //     .collect();
 
         ControlDependencies::from_map(cdep, body)
     }
@@ -98,12 +90,12 @@ pub fn control_dependencies(func: &Function) -> ControlDependencies {
     // 1. calculate the reverse CFG
     cfg.reverse();
     let reverse_cfg = cfg;
-    println!("reverse cfg is {:?}", reverse_cfg);
+    // println!("reverse cfg is {:?}", reverse_cfg);
 
     // 2. post dominator tree
     let post_dominators = petgraph::algo::dominators::simple_fast(&reverse_cfg, return_node);
 
-    println!("post dominators are {:?}", post_dominators);
+    // println!("post dominators are {:?}", post_dominators);
 
     ControlDependencies::from_post_dominators(post_dominators, &reverse_cfg, &func.body)
 }

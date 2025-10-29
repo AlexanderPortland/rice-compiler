@@ -1,4 +1,3 @@
-#![deny(warnings)]
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::write_with_newline,

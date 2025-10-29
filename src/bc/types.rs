@@ -36,6 +36,30 @@ impl Program {
         &self.0
     }
 
+    /// NOTE: returns none if the function's defined within the standard library.
+    pub fn find_function(&self, sym: Symbol) -> Option<&Function> {
+        let matching = self
+            .functions()
+            .into_iter()
+            .filter(|func| func.name == sym)
+            .collect::<Vec<_>>();
+
+        if matching.is_empty() {
+            return None;
+        }
+
+        assert!(
+            matching.len() == 1,
+            "we should only have a single function named, {sym}"
+        );
+        Some(matching[0])
+    }
+
+    pub fn main_function(&self) -> &Function {
+        self.find_function(Symbol::main())
+            .expect("we should have a main function")
+    }
+
     pub fn functions_mut(&mut self) -> &mut [Function] {
         &mut self.0
     }
@@ -539,6 +563,15 @@ impl Terminator {
 
     pub fn kind_mut(&mut self) -> &mut TerminatorKind {
         &mut self.kind
+    }
+
+    pub fn places(&self) -> SmallVec<[Place; 2]> {
+        match &self.kind {
+            TerminatorKind::Return(op) | TerminatorKind::CondJump { cond: op, .. } => {
+                op.as_place().into_iter().collect()
+            }
+            TerminatorKind::Jump(_) => SmallVec::new(),
+        }
     }
 }
 

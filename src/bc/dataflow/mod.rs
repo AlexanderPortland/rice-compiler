@@ -16,7 +16,7 @@ use indexical::{
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
-use crate::bc::types::BasicBlockIdx;
+use crate::bc::types::{BasicBlockIdx, TerminatorKind};
 
 use super::types::{Function, Location, Statement, Terminator};
 
@@ -93,6 +93,32 @@ pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> Analys
     }
 
     state
+}
+
+pub fn join_ret_locations<A: Analysis>(
+    analysis: &A,
+    res: AnalysisState<A>,
+    func: &Function,
+) -> A::Domain {
+    let mut joined_ret = A::bottom(analysis, func);
+    for ret_loc in ret_locations(func) {
+        joined_ret.join(res.get(ret_loc));
+    }
+    joined_ret
+}
+
+fn ret_locations(func: &Function) -> impl Iterator<Item = Location> {
+    func.body.blocks().filter_map(|idx| {
+        let block = func.body.data(idx);
+        if let TerminatorKind::Return(_) = block.terminator.kind() {
+            Some(Location {
+                block: idx,
+                instr: block.terminator_index(),
+            })
+        } else {
+            None
+        }
+    })
 }
 
 fn apply_transfer<A: Analysis>(

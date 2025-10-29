@@ -16,13 +16,17 @@ use crate::{
 };
 
 /// A location in memory.
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum MemLoc {
     /// A normal value stored in a [Local] (on the stack).
     Local(LocalIdx),
     /// A tuple value within an [Allocation]. It's conceptually on the heap despite that
     /// optimizations might decide to actually allocate it on the stack instead.
     Allocated(Allocation, AllocProj),
+}
+
+indexical::define_index_type! {
+    pub struct MemLocIdx for MemLoc = u32;
 }
 
 impl std::fmt::Display for MemLoc {
@@ -76,6 +80,14 @@ pub struct PtrPlaceData {
 }
 
 interned!(PtrPlace, PtrPlaceData);
+
+impl PtrPlace {
+    pub fn extend_projection(self, proj: AllocProj) -> Self {
+        let mut d = (*self.0).clone();
+        d.projection.push(proj);
+        PtrPlace(Intern::new(d))
+    }
+}
 
 impl From<Place> for PtrPlace {
     fn from(value: Place) -> Self {

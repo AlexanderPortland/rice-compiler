@@ -16,7 +16,7 @@ use crate::bc::{
 };
 
 pub mod escape;
-mod types;
+pub mod types;
 
 /// Conceptually should also
 pub fn pointer_analysis(func: &Function) -> PointerAnalysis {
@@ -37,6 +37,29 @@ impl PointerAnalysis {
             domain,
             points_to: HashMap::new(),
         }
+    }
+
+    /// The list of all allocations that can be reached with additional projections
+    /// from a given starting place.
+    pub fn reachable_allocations(&self, p: &Place) -> HashSet<MemLoc> {
+        let mut to_visit = self.could_refer_to(p);
+        let mut collect = HashSet::new();
+
+        while let Some(visit) = to_visit.pop() {
+            if !collect.insert(visit) {
+                // let a: Vec<MemLoc> = self
+                //     .points_to
+                //     .iter()
+                //     .flat_map(|(loc, point_to)| point_to.iter())
+                //     .collect();
+                // let new_visits = match visit {
+                //     MemLoc::Local(local) => self.points_to,
+                // };
+                todo!();
+            }
+        }
+
+        collect
     }
 
     // NOTE: implemented this for like no reason bc i thought maybe it'd be useful in the future

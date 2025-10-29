@@ -1,14 +1,50 @@
-use crate::bc::{
-    dataflow::{self, AnalysisState, r#const::ConstAnalysis, ptr::PointerAnalysis},
-    taint::control::{self, ControlDependencies},
-    types::{Function, Program},
+use std::{collections::HashMap, sync::Arc};
+
+use indexical::IndexedDomain;
+
+use crate::{
+    bc::{
+        dataflow::{
+            self, AnalysisState,
+            r#const::ConstAnalysis,
+            ptr::{PointerAnalysis, types::MemLoc},
+        },
+        taint::{
+            control::{self, ControlDependencies},
+            loc::all_memlocs,
+        },
+        types::{Function, Program},
+    },
+    utils::Symbol,
 };
 
-#[allow(clippy::used_underscore_binding)]
 pub struct Facts {
     ptr: PointerAnalysis,
     _const: AnalysisState<ConstAnalysis>,
     control: ControlDependencies,
+    domains: Domains,
+}
+
+pub struct Domains {
+    pub memloc: Arc<IndexedDomain<MemLoc>>,
+}
+
+impl Facts {
+    pub fn domains(&self) -> &Domains {
+        &self.domains
+    }
+
+    pub fn ptr(&self) -> &PointerAnalysis {
+        &self.ptr
+    }
+
+    pub fn control(&self) -> &ControlDependencies {
+        &self.control
+    }
+
+    pub fn _const(&self) -> &AnalysisState<ConstAnalysis> {
+        &self._const
+    }
 }
 
 impl std::fmt::Debug for Facts {
@@ -20,8 +56,12 @@ impl std::fmt::Debug for Facts {
     }
 }
 
-pub fn intraprocedural_facts(prog: &Program) -> Vec<Facts> {
-    prog.functions().iter().map(generate_facts).collect()
+pub fn intraprocedural_facts(prog: &Program) -> HashMap<Symbol, Facts> {
+    let mut facts = HashMap::new();
+    for func in prog.functions() {
+        facts.insert(func.name, generate_facts(func));
+    }
+    facts
 }
 
 fn generate_facts(func: &Function) -> Facts {
@@ -30,8 +70,13 @@ fn generate_facts(func: &Function) -> Facts {
     let control = control::control_dependencies(func);
 
     Facts {
-        ptr,
         _const,
         control,
+        domains: Domains {
+            memloc: Arc::new(IndexedDomain::from_iter(
+                all_memlocs(func, &ptr).into_iter(),
+            )),
+        },
+        ptr,
     }
 }
