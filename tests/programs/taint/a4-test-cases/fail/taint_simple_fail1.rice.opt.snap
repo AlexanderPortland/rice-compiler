@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × illegal call to function `println` with tainted values
+   ╭─[taint_simple_fail1.rice:6:11]
+ 5 │     
+ 6 │ ╭─▶ fn main() {
+ 7 │ │     println(int_to_string(secure()))
+ 8 │ ╰─▶ }
+   ╰────
+
+'''
