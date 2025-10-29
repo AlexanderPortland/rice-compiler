@@ -12,12 +12,12 @@ pub struct ControlDependencies(Graph<BasicBlockIdx, ()>);
 impl ControlDependencies {
     /// Iterator over all the nodes this one is control dependent on.
     pub fn cdep_on(&self, block: BasicBlockIdx) -> impl Iterator<Item = BasicBlockIdx> {
-        println!("cdep on {block}");
+        // println!("cdep on {block}");
         self.0
             .edges_directed(block.into(), petgraph::Direction::Outgoing)
             .flat_map(|edge| {
                 let a = edge.target().id().into();
-                println!("edge to {a}");
+                // println!("edge to {a}");
                 self.cdep_on(a).chain([a]).collect::<Vec<_>>().into_iter()
             })
     }

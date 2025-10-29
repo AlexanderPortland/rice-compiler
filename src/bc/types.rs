@@ -1,6 +1,6 @@
 //! Type definitions for the bytecode.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use either::Either;
 use indexical::IndexedDomain;
@@ -37,11 +37,12 @@ impl Program {
     }
 
     /// NOTE: returns none if the function's defined within the standard library.
-    pub fn find_function(&self, sym: Symbol) -> Option<&Function> {
+    pub fn find_function(&self, sym: impl Borrow<Symbol>) -> Option<&Function> {
+        let sym = sym.borrow();
         let matching = self
             .functions()
             .into_iter()
-            .filter(|func| func.name == sym)
+            .filter(|func| func.name == *sym)
             .collect::<Vec<_>>();
 
         if matching.is_empty() {

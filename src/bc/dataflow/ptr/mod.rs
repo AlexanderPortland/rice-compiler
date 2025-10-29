@@ -41,23 +41,37 @@ impl PointerAnalysis {
 
     /// The list of all allocations that can be reached with additional projections
     /// from a given starting place.
-    pub fn reachable_allocations(&self, p: &Place) -> HashSet<MemLoc> {
-        let mut to_visit = self.could_refer_to(p);
-        let mut collect = HashSet::new();
+    pub fn reachable_memlocs(&self, p: &Place) -> HashSet<MemLoc> {
+        // println!("getting all reachable places from {p:?}");
+        let memlocs = self.could_refer_to(p);
+
+        let mut to_visit = memlocs
+            .iter()
+            .flat_map(|memloc| {
+                self.points_to
+                    .get(memloc)
+                    .into_iter()
+                    .flat_map(|v| v.iter())
+            })
+            .collect::<Vec<_>>();
+        let mut collect: HashSet<MemLoc> = memlocs.into_iter().collect();
+        let mut visited = HashSet::new();
 
         while let Some(visit) = to_visit.pop() {
-            if !collect.insert(visit) {
-                // let a: Vec<MemLoc> = self
-                //     .points_to
-                //     .iter()
-                //     .flat_map(|(loc, point_to)| point_to.iter())
-                //     .collect();
-                // let new_visits = match visit {
-                //     MemLoc::Local(local) => self.points_to,
-                // };
-                todo!();
+            if !visited.insert(visit) {
+                /// Get all memlocs reachable from this allocation
+                for (memloc, points_to) in &self.points_to {
+                    if let MemLoc::Allocated(alloc, _) = memloc
+                        && alloc == visit
+                    {
+                        collect.insert(*memloc);
+                        to_visit.extend(points_to.iter());
+                    }
+                }
             }
         }
+
+        // println!("found {collect:?}");
 
         collect
     }
