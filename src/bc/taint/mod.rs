@@ -280,6 +280,21 @@ impl LocalAnalysis<'_> {
         }
     }
 
+    fn output_proj_tainted(
+        &self,
+        state: &mut TaintedPlaces,
+        statement: &super::types::Statement,
+        proj: AllocProj,
+    ) {
+        for memloc in self
+            .facts
+            .ptr()
+            .could_refer_to(&PtrPlace::from(statement.place).extend_projection(proj))
+        {
+            state.insert(memloc);
+        }
+    }
+
     fn output_not_tainted(&self, state: &mut TaintedPlaces, statement: &super::types::Statement) {
         // TODO: (WILL) we can't erase based on an over approximation, right?
         let c = self.facts.ptr().could_refer_to(&statement.place);
@@ -290,7 +305,12 @@ impl LocalAnalysis<'_> {
         state.remove(c[0]);
     }
 
-    fn handle_alloc(&self, state: &mut TaintedPlaces, statement: &super::types::Statement) {
+    fn handle_alloc(
+        &self,
+        state: &mut TaintedPlaces,
+        statement: &super::types::Statement,
+        implicit_flow: Option<(Place, Span)>,
+    ) {
         let Rvalue::Alloc { kind, loc, args } = &statement.rvalue else {
             unreachable!();
         };
@@ -299,12 +319,10 @@ impl LocalAnalysis<'_> {
             (AllocKind::Tuple, AllocArgs::Lit(literals)) => {
                 // For each literal, mark the corresponding memloc as tainted if the operand is tainted
                 for (i, lit) in literals.iter().enumerate() {
-                    if detect::op_could_be_tainted(&state, self.facts.ptr())(lit) {
-                        let new_place =
-                            PtrPlace::from(statement.place).extend_projection(AllocProj::Field(i));
-                        for memloc in self.facts.ptr().could_refer_to(&new_place) {
-                            state.insert(memloc);
-                        }
+                    if detect::op_could_be_tainted(&state, self.facts.ptr())(lit)
+                        || implicit_flow.is_some()
+                    {
+                        self.output_proj_tainted(state, statement, AllocProj::Field(i));
                     }
                 }
             }
@@ -315,8 +333,9 @@ impl LocalAnalysis<'_> {
                     .places()
                     .iter()
                     .any(detect::place_could_be_tainted(&state, self.facts.ptr()))
+                    || implicit_flow.is_some()
                 {
-                    self.output_tainted(state, statement);
+                    self.output_proj_tainted(state, statement, AllocProj::Index);
                 } else {
                 }
             }
@@ -511,6 +530,8 @@ impl dataflow::Analysis for LocalAnalysis<'_> {
             // println!("\t{s} is tainted!");
         }
 
+        // println!("analyzing statment {statement}");
+
         let implicit_flow = self.implicit_flow_for_block(state, &loc.block);
 
         match statement.rvalue {
@@ -533,7 +554,7 @@ impl dataflow::Analysis for LocalAnalysis<'_> {
                     self.output_not_tainted(state, statement);
                 }
             }
-            Rvalue::Alloc { .. } => self.handle_alloc(state, statement),
+            Rvalue::Alloc { .. } => self.handle_alloc(state, statement, implicit_flow),
             Rvalue::Call { .. } => self.handle_call(state, statement, &loc, implicit_flow),
             Rvalue::MethodCall { .. } => todo!(),
         }
