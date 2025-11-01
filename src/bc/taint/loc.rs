@@ -13,6 +13,7 @@ use crate::bc::{
 
 pub fn all_memlocs(func: &Function, ptr: &PointerAnalysis) -> HashSet<MemLoc> {
     let all_allocs: HashSet<Allocation> = ptr.alloc_domain().iter().cloned().collect();
+
     let mut all_memlocs: HashSet<MemLoc> = func
         .locals
         .indices()
@@ -58,7 +59,6 @@ pub fn all_memlocs(func: &Function, ptr: &PointerAnalysis) -> HashSet<MemLoc> {
         };
     }
 
-    // println!("all memlocs in {} are {:?}", func.name, all_memlocs);
     all_memlocs
 }
 

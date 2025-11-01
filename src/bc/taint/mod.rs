@@ -585,42 +585,19 @@ impl LocalAnalysis<'_> {
         }
 
         for (caller_place, callee_place) in &calling_context.all {
-            if place_could_be_tainted(&res, callee_ptr)(&callee_place.0) {
-                // println!(
-                //     "callee place {} in {} could be tainted!",
-                //     callee_place.0, func.name
-                // );
+            // if the callee place could be tainted (and has a projection making it not pass by value),
+            // we mark the corresponding caller place as tainted
+            if place_could_be_tainted(&res, callee_ptr)(&callee_place.0)
+                && !caller_place.projection.is_empty()
+            {
                 for loc in self.facts.ptr().could_refer_to(caller_place) {
                     state.insert(loc);
                 }
-            } else {
-                // println!(
-                //     "callee place {} in {} could NOT be tainted!",
-                //     callee_place.0, func.name
-                // );
             }
         }
 
         for i in res.iter() {
             // println!("{i} is tainted on return!");
-        }
-
-        // for argument places,
-        for (caller_place, callee_place) in &calling_context.all {
-            // if the callee place could be tainted (and has a projection making it not pass by value),
-            // we mark the corresponding caller place as tainted
-            if place_could_be_tainted(&res, self.facts.ptr())(&callee_place.0)
-                && !caller_place.projection.is_empty()
-            {
-                // println!(
-                //     "because of callee's {} being tainted, {caller_place} is tainted",
-                //     callee_place.0
-                // );
-                for loc in self.facts.ptr().could_refer_to(caller_place) {
-                    // println!("\twhich aliases {loc}");
-                    state.insert(loc);
-                }
-            }
         }
 
         // Otherwise, recur into the call...
