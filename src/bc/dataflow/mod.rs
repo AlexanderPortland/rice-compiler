@@ -16,7 +16,7 @@ use indexical::{
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
-use crate::bc::types::{BasicBlockIdx, TerminatorKind};
+use crate::bc::types::{BasicBlock, BasicBlockIdx, Operand, Place, TerminatorKind};
 
 use super::types::{Function, Location, Statement, Terminator};
 
@@ -95,6 +95,7 @@ pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> Analys
     state
 }
 
+/// Gets the analysis state joined across all returns
 pub fn join_ret_locations<A: Analysis>(
     analysis: &A,
     res: AnalysisState<A>,
@@ -107,18 +108,37 @@ pub fn join_ret_locations<A: Analysis>(
     joined_ret
 }
 
-fn ret_locations(func: &Function) -> impl Iterator<Item = Location> {
-    func.body.blocks().filter_map(|idx| {
-        let block = func.body.data(idx);
-        if let TerminatorKind::Return(_) = block.terminator.kind() {
-            Some(Location {
-                block: idx,
-                instr: block.terminator_index(),
-            })
+/// Gets the places returned by each return
+// TODO: definitely a heavy overapprox bc we're taking ALL places for ALL returns, should be able to just get one
+pub fn ret_places(func: &Function) -> impl Iterator<Item = (Location, Place)> {
+    rets(func).filter_map(|(loc, op)| {
+        if let Operand::Place(p) = op {
+            Some((loc, p))
         } else {
             None
         }
     })
+}
+
+fn rets(func: &Function) -> impl Iterator<Item = (Location, Operand)> {
+    func.body.blocks().filter_map(|idx| {
+        let block = func.body.data(idx);
+        if let TerminatorKind::Return(to) = block.terminator.kind() {
+            Some((
+                Location {
+                    block: idx,
+                    instr: block.terminator_index(),
+                },
+                to.clone(),
+            ))
+        } else {
+            None
+        }
+    })
+}
+
+fn ret_locations(func: &Function) -> impl Iterator<Item = Location> {
+    rets(func).map(|(loc, op)| loc)
 }
 
 fn apply_transfer<A: Analysis>(

@@ -69,6 +69,13 @@ fn generate_facts(func: &Function) -> Facts {
     let ptr = dataflow::ptr::pointer_analysis(func);
     let control = control::control_dependencies(func);
 
+    // println!("POINTER REVIEW for {}", func.name);
+    for (loc, points_to) in ptr.points_to() {
+        for p in points_to.iter() {
+            // println!("{loc} -> {p:?}");
+        }
+    }
+
     Facts {
         _const,
         control,

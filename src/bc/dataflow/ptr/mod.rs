@@ -42,7 +42,6 @@ impl PointerAnalysis {
     /// The list of all allocations that can be reached with additional projections
     /// from a given starting place.
     pub fn reachable_memlocs(&self, p: &Place) -> HashSet<MemLoc> {
-        // println!("getting all reachable places from {p:?}");
         let memlocs = self.could_refer_to(p);
 
         let mut to_visit = memlocs
@@ -88,7 +87,7 @@ impl PointerAnalysis {
             .iter()
             .filter(|alloc| match alloc {
                 Allocation::Real(_) => true,
-                Allocation::FromArg(_) => false,
+                Allocation::FromArg(_, _) => false,
             })
             .chain(arguments.iter().map(|(place, alloc)| alloc))
             .copied();
@@ -125,7 +124,7 @@ impl PointerAnalysis {
     ) -> Result<Allocation, String> {
         match alloc {
             Allocation::Real(_) => Ok(*alloc),
-            Allocation::FromArg(place) => replace
+            Allocation::FromArg(place, ty) => replace
                 .get(place)
                 .ok_or(format!("no replacement found for arg place {place}"))
                 .cloned(),
@@ -219,7 +218,7 @@ fn handle_argument_alloc(
 ) {
     match of_ty.kind() {
         crate::bc::types::TypeKind::Array(inner_ty) => {
-            let array_alloc = Allocation::from_arg(to_place);
+            let array_alloc = Allocation::from_arg(to_place, of_ty);
             el_constraints.push((array_alloc, to_place.into()));
 
             handle_argument_alloc(
@@ -230,7 +229,7 @@ fn handle_argument_alloc(
             );
         }
         crate::bc::types::TypeKind::Tuple(inner_tys) => {
-            let array_alloc = Allocation::from_arg(to_place);
+            let array_alloc = Allocation::from_arg(to_place, of_ty);
             el_constraints.push((array_alloc, to_place.into()));
 
             for (i, inner) in inner_tys.iter().enumerate() {

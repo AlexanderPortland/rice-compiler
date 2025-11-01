@@ -48,7 +48,7 @@ pub enum AllocProj {
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum Allocation {
     /// An allocation passed into the function as an argument.
-    FromArg(PtrPlace),
+    FromArg(PtrPlace, Type),
     /// A 'real' allocation made within the current function at a given location.
     Real(Location),
 }
@@ -58,8 +58,8 @@ indexical::define_index_type! {
 }
 
 impl Allocation {
-    pub fn from_arg(arg_p: impl Into<PtrPlace>) -> Self {
-        Self::FromArg(arg_p.into())
+    pub fn from_arg(arg_p: impl Into<PtrPlace>, ty: Type) -> Self {
+        Self::FromArg(arg_p.into(), ty)
     }
 
     pub fn from_loc(loc: Location) -> Self {

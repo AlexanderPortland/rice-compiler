@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    sync::Arc,
 };
 
 use crate::{
@@ -12,6 +13,7 @@ use crate::{
                 PointerAnalysis,
                 types::{AllocProj, MemLoc, PtrPlace},
             },
+            ret_places,
         },
         taint::{
             detect::{op_could_be_tainted_deep, place_could_be_tainted},
@@ -25,7 +27,7 @@ use crate::{
     },
     utils::{Symbol, sym},
 };
-use indexical::ArcIndexSet;
+use indexical::{ArcIndexSet, IndexedDomain, set::IndexSet};
 use itertools::Itertools;
 use miette::{Diagnostic, Result, bail};
 use thiserror::Error;
@@ -83,9 +85,9 @@ pub fn check_taints(prog: &Program) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
 struct CallingContext {
-    all: bimap::BiBTreeMap<Place, CalleePlace>,
+    all: bimap::BiBTreeMap<PtrPlace, CalleePlace>,
     tainted: Vec<CalleePlace>,
 }
 
@@ -108,7 +110,7 @@ struct GlobalAnalysis<'p> {
 
     /// For each function, maps the calling context (of tainted inputs)
     /// to the resulting tainted places after execution.
-    results: RefCell<HashMap<Symbol, HashMap<CallingContext, TaintedPlaces>>>,
+    results: RefCell<HashMap<Symbol, HashMap<CallingContextTainted, TaintedPlaces>>>,
 
     illegal_calls: RefCell<Vec<IllegalCall>>,
 }
@@ -139,7 +141,7 @@ impl GlobalAnalysis<'_> {
 
 struct LocalAnalysis<'f> {
     func: &'f Function,
-    calling_context: &'f CallingContext,
+    initial_tainted: &'f CallingContextTainted,
     facts: &'f Facts,
     global: &'f GlobalAnalysis<'f>,
 }
@@ -150,33 +152,55 @@ impl LocalAnalysis<'_> {
         calling_context: CallingContext,
         global: &GlobalAnalysis,
     ) -> TaintedPlaces {
-        // println!(
-        //     "analyzing call of {} w/ context {:#?}",
-        //     call_to.name, calling_context
-        // );
+        let facts = global
+            .facts
+            .get(&call_to.name)
+            .expect("should have facts entry");
 
-        global
+        assert!(global.results.try_borrow_mut().is_ok());
+
+        // initialize fn calling ctxts if not already
+        if global.results.borrow_mut().get(&call_to.name).is_none() {
+            assert_eq!(
+                global
+                    .results
+                    .borrow_mut()
+                    .insert(call_to.name, HashMap::new()),
+                None
+            );
+        }
+
+        if let Some(s) = global
             .results
             .borrow_mut()
-            .entry(call_to.name)
-            .or_default()
-            .entry(calling_context)
-            .or_insert_with_key(|calling_context| {
-                let facts = global
-                    .facts
-                    .get(&call_to.name)
-                    .expect("should have facts entry");
-                let local = LocalAnalysis {
-                    func: call_to,
-                    calling_context,
-                    global,
-                    facts,
-                };
+            .get(&call_to.name)
+            .expect("initialized above")
+            .get(&calling_context.tainted)
+        {
+            return s.clone();
+        }
 
-                let all = analyze_to_fixpoint(&local, call_to);
-                join_ret_locations(&local, all, call_to)
-            })
-            .clone()
+        let local = LocalAnalysis {
+            func: call_to,
+            initial_tainted: &calling_context.tainted,
+            global,
+            facts,
+        };
+
+        let all = analyze_to_fixpoint(&local, call_to);
+        let ret = join_ret_locations(&local, all, call_to);
+
+        assert_eq!(
+            global
+                .results
+                .borrow_mut()
+                .get_mut(&call_to.name)
+                .expect("initialized above")
+                .insert(calling_context.tainted, ret.clone()),
+            None
+        );
+
+        ret
     }
 }
 
@@ -190,6 +214,7 @@ mod detect {
     use std::collections::HashSet;
     use std::collections::VecDeque;
 
+    use crate::bc::dataflow::ptr::types::PtrPlace;
     use crate::bc::taint::PointerAnalysis;
     use crate::bc::taint::TaintedPlaces;
     use crate::bc::types::Operand;
@@ -238,10 +263,10 @@ mod detect {
         }
     }
 
-    pub fn place_could_be_tainted(
+    pub fn place_could_be_tainted<T: Into<PtrPlace> + Copy>(
         tainted: &TaintedPlaces,
         ptr: &PointerAnalysis,
-    ) -> impl Fn(&Place) -> bool {
+    ) -> impl Fn(&T) -> bool {
         move |place| {
             for mem_loc in ptr.could_refer_to(place) {
                 if tainted.contains(mem_loc) {
@@ -255,21 +280,54 @@ mod detect {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Copy)]
-struct CalleePlace(Place);
+struct CalleePlace(PtrPlace);
+
+impl CalleePlace {
+    pub fn extend_projection(self, proj: AllocProj) -> Self {
+        CalleePlace(self.0.extend_projection(proj))
+    }
+}
 
 fn map_arg_place(
     ptr: &PointerAnalysis,
-    arg_place: &Place,
-    to_local: LocalIdx,
-    ty: Type,
-) -> bimap::BiMap<Place, CalleePlace> {
+    arg_place: &PtrPlace,
+    to_place: CalleePlace,
+    ty: &Type,
+) -> bimap::BiMap<PtrPlace, CalleePlace> {
     match ty.kind() {
-        TypeKind::Array(inner) => todo!(),
-        TypeKind::Tuple(inners) => todo!(),
+        TypeKind::Array(inner) => {
+            // okay so we have
+            [(*arg_place, to_place)]
+                .into_iter()
+                .chain(
+                    map_arg_place(
+                        ptr,
+                        &arg_place.extend_projection(AllocProj::Index),
+                        to_place.extend_projection(AllocProj::Index),
+                        inner,
+                    )
+                    .into_iter(),
+                )
+                .collect()
+        }
+        TypeKind::Tuple(inners) => {
+            // okay so we have smth along the line of (x1, x2) passed in to arg_place
+            // we want to say, for each
+            [(*arg_place, to_place)]
+                .into_iter()
+                .chain(inners.iter().enumerate().flat_map(|(i, inner_ty)| {
+                    map_arg_place(
+                        ptr,
+                        &arg_place.extend_projection(AllocProj::Field(i)),
+                        to_place.extend_projection(AllocProj::Field(i)),
+                        inner_ty,
+                    )
+                    .into_iter()
+                }))
+                .collect()
+        }
         TypeKind::Struct(inners) => todo!(),
-        _ => [(*arg_place, CalleePlace(Place::new(to_local, vec![], ty)))]
-            .into_iter()
-            .collect(),
+        _ => [(*arg_place, to_place)].into_iter().collect(),
     }
 }
 
@@ -291,7 +349,19 @@ impl LocalAnalysis<'_> {
             .ptr()
             .could_refer_to(&PtrPlace::from(statement.place).extend_projection(proj))
         {
+            // println!(
+            //     "inserting memloc {memloc} to {} from {}",
+            //     self.func.name,
+            //     PtrPlace::from(statement.place).extend_projection(proj)
+            // );
+            // println!(
+            //     "{}: domain is {:?}",
+            //     self.func.name,
+            //     state.indices().collect::<Vec<_>>()
+            // );
+            // println!("{}: inserting memloc {memloc}", self.func.name);
             state.insert(memloc);
+            // println!("{}: done inserting memloc {memloc}", self.func.name);
         }
     }
 
@@ -421,7 +491,7 @@ impl LocalAnalysis<'_> {
 
                 if let Some(place) = places
                     .iter()
-                    .find(|a| place_could_be_tainted(&state, self.facts.ptr())(a))
+                    .find(|a| place_could_be_tainted(&state, self.facts.ptr())(*a))
                 {
                     Some((*place, term.span))
                 } else {
@@ -447,13 +517,20 @@ impl LocalAnalysis<'_> {
         let mut ctxt = CallingContext::empty();
         for ((arg_idx, ty), arg) in func.params().skip(1).zip_eq(args.iter()) {
             if let Operand::Place(p) = arg {
-                let new_info = map_arg_place(self.facts.ptr(), p, arg_idx, ty);
-                for (caller_place, callee_place) in &new_info {
-                    if place_could_be_tainted(state, self.facts.ptr())(caller_place) {
-                        ctxt.tainted.push(*callee_place);
-                    }
-                }
+                let new_info = map_arg_place(
+                    self.facts.ptr(),
+                    &(*p).into(),
+                    CalleePlace(Place::new(arg_idx, vec![], ty).into()),
+                    &ty,
+                );
                 ctxt.all.extend(new_info);
+            }
+        }
+
+        // For all caller places that are tainted, mark the corresponding callee place as tainted
+        for (caller_place, callee_place) in &ctxt.all {
+            if place_could_be_tainted(state, self.facts.ptr())(caller_place) {
+                ctxt.tainted.push(*callee_place);
             }
         }
 
@@ -488,13 +565,68 @@ impl LocalAnalysis<'_> {
         }
 
         let calling_context = self.build_calling_ctxt_for(state, statement, &call_to, args);
-        // println!("have calling context for {call_to}, {calling_context:?}");
+        let callee_ptr = self
+            .global
+            .facts
+            .get(&func.name)
+            .expect("should have")
+            .ptr();
+
+        let res =
+            LocalAnalysis::analyze_call_with_context(func, calling_context.clone(), self.global);
+
+        let ret_places = ret_places(func).collect::<Vec<_>>();
+        assert_eq!(ret_places.len(), 1);
+        let ret_place = ret_places.first().expect("just checked this has a value");
+        if place_could_be_tainted(&res, callee_ptr)(&ret_place.1) {
+            self.output_tainted(state, statement);
+        } else {
+            self.output_not_tainted(state, statement);
+        }
+
+        for (caller_place, callee_place) in &calling_context.all {
+            if place_could_be_tainted(&res, callee_ptr)(&callee_place.0) {
+                // println!(
+                //     "callee place {} in {} could be tainted!",
+                //     callee_place.0, func.name
+                // );
+                for loc in self.facts.ptr().could_refer_to(caller_place) {
+                    state.insert(loc);
+                }
+            } else {
+                // println!(
+                //     "callee place {} in {} could NOT be tainted!",
+                //     callee_place.0, func.name
+                // );
+            }
+        }
+
+        for i in res.iter() {
+            // println!("{i} is tainted on return!");
+        }
+
+        // for argument places,
+        for (caller_place, callee_place) in &calling_context.all {
+            // if the callee place could be tainted (and has a projection making it not pass by value),
+            // we mark the corresponding caller place as tainted
+            if place_could_be_tainted(&res, self.facts.ptr())(&callee_place.0)
+                && !caller_place.projection.is_empty()
+            {
+                // println!(
+                //     "because of callee's {} being tainted, {caller_place} is tainted",
+                //     callee_place.0
+                // );
+                for loc in self.facts.ptr().could_refer_to(caller_place) {
+                    // println!("\twhich aliases {loc}");
+                    state.insert(loc);
+                }
+            }
+        }
 
         // Otherwise, recur into the call...
-        todo!();
-        // let res = LocalAnalysis::analyze_call_with_context(call_to, calling_context, global);
-
-        todo!()
+        if implicit_flow.is_some() {
+            todo!("not sure what to do in this case...");
+        }
     }
 }
 
@@ -511,7 +643,7 @@ impl dataflow::Analysis for LocalAnalysis<'_> {
         let mut initial = TaintedPlaces::new(&self.facts.domains().memloc);
 
         // TODO: (WILL) this might be an over approximation bc we know EXACTLY what it points to at the start
-        for CalleePlace(tainted_place) in &self.calling_context.tainted {
+        for CalleePlace(tainted_place) in self.initial_tainted {
             for potential_memloc in self.facts.ptr().could_refer_to(tainted_place) {
                 initial.insert(potential_memloc);
             }

@@ -652,6 +652,26 @@ impl Place {
         }))
     }
 
+    pub fn places(&self) -> Vec<Place> {
+        let res = [*self]
+            .into_iter()
+            .chain(
+                self.projection
+                    .iter()
+                    .flat_map(|proj| {
+                        if let ProjectionElem::Index { index, ty } = proj {
+                            index.places()
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten(),
+            )
+            .collect();
+        // println!("place {self} has places {:?}", res);
+        res
+    }
+
     #[must_use]
     pub fn extend_projection(
         self,
