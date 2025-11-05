@@ -31,7 +31,8 @@ pub enum OptLevel {
 /// Run correctness analyses on the whole program.
 pub fn analyze(prog: &Program) -> Result<()> {
     // Only do our taint analysis if we have any secure functions.
-    if prog.functions().iter().any(|func| func.secure()) {
+    // TODO: should remove this to make sure we're handling taint analysis well generally
+    if prog.functions().iter().any(Function::secure) {
         taint::check_taints(prog)
     } else {
         miette::Result::Ok(())

@@ -1,8 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{cell::RefCell, collections::HashMap};
 
 use crate::{
     ast::types::Span,
@@ -18,16 +14,15 @@ use crate::{
         taint::{
             detect::{op_could_be_tainted_deep, place_could_be_tainted},
             facts::Facts,
-            loc::all_memlocs,
         },
         types::{
-            AllocArgs, AllocKind, BasicBlockIdx, Const, Function, Local, LocalIdx, Operand, Place,
-            Program, ProjectionElem, Rvalue, Statement, Type, TypeKind,
+            AllocArgs, AllocKind, BasicBlockIdx, Function, Operand, Place, Program, Rvalue, Type,
+            TypeKind,
         },
     },
-    utils::{Symbol, sym},
+    utils::Symbol,
 };
-use indexical::{ArcIndexSet, IndexedDomain, set::IndexSet};
+use indexical::ArcIndexSet;
 use itertools::Itertools;
 use miette::{Diagnostic, Result, bail};
 use thiserror::Error;
@@ -72,9 +67,6 @@ impl IllegalCall {
 pub fn check_taints(prog: &Program) -> Result<()> {
     // 1. Get intraprocedural facts
     let facts = facts::intraprocedural_facts(prog);
-    for func in prog.functions() {
-        // println!("{}: {:?}", func.name, facts[&func.name]);
-    }
 
     // 2. Compute interprocedural taint
     let mut taint = GlobalAnalysis::new(prog, facts).analyze_program();
@@ -134,8 +126,7 @@ impl GlobalAnalysis<'_> {
     }
 
     fn analyze_function(&self, func: &Function) {
-        // let local = LocalAnalysiss
-        LocalAnalysis::analyze_call_with_context(func, CallingContext::empty(), &self);
+        LocalAnalysis::analyze_call_with_context(func, CallingContext::empty(), self);
     }
 }
 
@@ -211,9 +202,6 @@ impl JoinSemiLattice for TaintedPlaces {
 }
 
 mod detect {
-    use std::collections::HashSet;
-    use std::collections::VecDeque;
-
     use crate::bc::dataflow::ptr::types::PtrPlace;
     use crate::bc::taint::PointerAnalysis;
     use crate::bc::taint::TaintedPlaces;
@@ -232,7 +220,7 @@ mod detect {
                 return true;
             }
 
-            return false;
+            false
         }
     }
 
@@ -248,7 +236,7 @@ mod detect {
                 return true;
             }
 
-            return false;
+            false
         }
     }
 
@@ -274,7 +262,7 @@ mod detect {
                 }
             }
 
-            return false;
+            false
         }
     }
 }
@@ -289,47 +277,41 @@ impl CalleePlace {
 }
 
 fn map_arg_place(
-    ptr: &PointerAnalysis,
-    arg_place: &PtrPlace,
+    arg_place: PtrPlace,
     to_place: CalleePlace,
-    ty: &Type,
+    ty: Type,
 ) -> bimap::BiMap<PtrPlace, CalleePlace> {
     match ty.kind() {
         TypeKind::Array(inner) => {
             // okay so we have
-            [(*arg_place, to_place)]
+            [(arg_place, to_place)]
                 .into_iter()
-                .chain(
-                    map_arg_place(
-                        ptr,
-                        &arg_place.extend_projection(AllocProj::Index),
-                        to_place.extend_projection(AllocProj::Index),
-                        inner,
-                    )
-                    .into_iter(),
-                )
+                .chain(map_arg_place(
+                    arg_place.extend_projection(AllocProj::Index),
+                    to_place.extend_projection(AllocProj::Index),
+                    *inner,
+                ))
                 .collect()
         }
         TypeKind::Tuple(inners) => {
             // okay so we have smth along the line of (x1, x2) passed in to arg_place
             // we want to say, for each
-            [(*arg_place, to_place)]
+            [(arg_place, to_place)]
                 .into_iter()
                 .chain(inners.iter().enumerate().flat_map(|(i, inner_ty)| {
                     map_arg_place(
-                        ptr,
-                        &arg_place.extend_projection(AllocProj::Field(i)),
+                        arg_place.extend_projection(AllocProj::Field(i)),
                         to_place.extend_projection(AllocProj::Field(i)),
-                        inner_ty,
+                        *inner_ty,
                     )
                     .into_iter()
                 }))
                 .collect()
         }
-        TypeKind::Struct(inners) => {
+        TypeKind::Struct(_inners) => {
             todo!()
         }
-        _ => [(*arg_place, to_place)].into_iter().collect(),
+        _ => [(arg_place, to_place)].into_iter().collect(),
     }
 }
 
@@ -383,16 +365,15 @@ impl LocalAnalysis<'_> {
         statement: &super::types::Statement,
         implicit_flow: Option<(Place, Span)>,
     ) {
-        let Rvalue::Alloc { kind, loc, args } = &statement.rvalue else {
+        let Rvalue::Alloc { kind, args, .. } = &statement.rvalue else {
             unreachable!();
         };
 
         match (kind, args) {
-            (AllocKind::Tuple, AllocArgs::Lit(literals))
-            | (AllocKind::Struct, AllocArgs::Lit(literals)) => {
+            (AllocKind::Tuple | AllocKind::Struct, AllocArgs::Lit(literals)) => {
                 // For each literal, mark the corresponding memloc as tainted if the operand is tainted
                 for (i, lit) in literals.iter().enumerate() {
-                    if detect::op_could_be_tainted(&state, self.facts.ptr())(lit)
+                    if detect::op_could_be_tainted(state, self.facts.ptr())(lit)
                         || implicit_flow.is_some()
                     {
                         self.output_proj_tainted(state, statement, AllocProj::Field(i));
@@ -405,11 +386,10 @@ impl LocalAnalysis<'_> {
                     .rvalue
                     .places()
                     .iter()
-                    .any(detect::place_could_be_tainted(&state, self.facts.ptr()))
+                    .any(detect::place_could_be_tainted(state, self.facts.ptr()))
                     || implicit_flow.is_some()
                 {
                     self.output_proj_tainted(state, statement, AllocProj::Index);
-                } else {
                 }
             }
             _ => todo!(),
@@ -423,14 +403,14 @@ impl LocalAnalysis<'_> {
                 if p.projection.is_empty()
                     && let local = p.local
                     && let dataflow::r#const::ConstInfo::Closure(closure) =
-                        self.facts._const().get(loc).get(local)
+                        self.facts.constant().get(loc).get(local)
                 {
                     Some(*closure)
                 } else {
                     None
                 }
             }
-            _ => unreachable!("shouldn't typecheck"),
+            Operand::Const(_) => unreachable!("shouldn't typecheck"),
         }
     }
 
@@ -439,30 +419,30 @@ impl LocalAnalysis<'_> {
         &self,
         state: &mut TaintedPlaces,
         statement: &super::types::Statement,
-        sym: &Symbol,
+        sym: Symbol,
         implicit_flow: Option<(Place, Span)>,
     ) {
-        let Rvalue::Call { f, args } = &statement.rvalue else {
+        let Rvalue::Call { args, .. } = &statement.rvalue else {
             unreachable!();
         };
 
         // Println call!
-        if *sym == crate::utils::sym("println") {
+        if sym == crate::utils::sym("println") {
             if args
                 .iter()
-                .any(|op| op_could_be_tainted_deep(&state, self.facts.ptr())(op))
+                .any(|op| op_could_be_tainted_deep(state, self.facts.ptr())(op))
             {
                 self.global
                     .illegal_calls
                     .borrow_mut()
-                    .push(IllegalCall::tainted_args(*sym, statement.span));
+                    .push(IllegalCall::tainted_args(sym, statement.span));
             } else if let Some(implicit_flow) = implicit_flow {
                 self.global
                     .illegal_calls
                     .borrow_mut()
                     .push(IllegalCall::implicit_flow(
                         implicit_flow,
-                        (*sym, statement.span),
+                        (sym, statement.span),
                     ));
             }
         }
@@ -478,37 +458,27 @@ impl LocalAnalysis<'_> {
         }
     }
 
+    #[allow(clippy::explicit_auto_deref)]
     fn implicit_flow_for_block(
         &self,
         state: &TaintedPlaces,
-        block: &BasicBlockIdx,
+        block: BasicBlockIdx,
     ) -> Option<(Place, Span)> {
-        self.facts
-            .control()
-            .cdep_on(*block)
-            .filter_map(|cond_block| {
-                // println!("conditional on block {cond_block}");
-                let term = &self.func.body.data(cond_block).terminator;
-                let places = term.places();
-                // println!("terminator {term:?}, places {:?}", places);
+        self.facts.control().cdep_on(block).find_map(|cond_block| {
+            let term = &self.func.body.data(cond_block).terminator;
+            let places = term.places();
 
-                if let Some(place) = places
-                    .iter()
-                    .find(|a| place_could_be_tainted(&state, self.facts.ptr())(*a))
-                {
-                    Some((*place, term.span))
-                } else {
-                    None
-                }
-            })
-            .next()
+            places
+                .iter()
+                .find(|a| place_could_be_tainted(state, self.facts.ptr())(*a))
+                .map(|place| (*place, term.span))
+        })
     }
 
     fn build_calling_ctxt_for(
         &self,
         state: &TaintedPlaces,
-        statement: &super::types::Statement,
-        sym: &Symbol,
+        sym: Symbol,
         args: &[Operand],
     ) -> CallingContext {
         let func = self
@@ -521,10 +491,9 @@ impl LocalAnalysis<'_> {
         for ((arg_idx, ty), arg) in func.params().skip(1).zip_eq(args.iter()) {
             if let Operand::Place(p) = arg {
                 let new_info = map_arg_place(
-                    self.facts.ptr(),
-                    &(*p).into(),
+                    (*p).into(),
                     CalleePlace(Place::new(arg_idx, vec![], ty).into()),
-                    &ty,
+                    ty,
                 );
                 ctxt.all.extend(new_info);
             }
@@ -541,18 +510,13 @@ impl LocalAnalysis<'_> {
     }
 
     fn handle_unknown_call(&self, state: &mut TaintedPlaces, statement: &super::types::Statement) {
-        let Rvalue::Call { f, args } = &statement.rvalue else {
+        let Rvalue::Call { args, .. } = &statement.rvalue else {
             unreachable!();
         };
 
         for a in args {
             if let Operand::Place(p) = a {
-                for (sub_place, _) in map_arg_place(
-                    self.facts.ptr(),
-                    &(*p).into(),
-                    CalleePlace((*p).into()),
-                    &a.ty(),
-                ) {
+                for (sub_place, _) in map_arg_place((*p).into(), CalleePlace((*p).into()), a.ty()) {
                     for loc in self.facts.ptr().could_refer_to(&sub_place) {
                         state.insert(loc);
                     }
@@ -580,7 +544,7 @@ impl LocalAnalysis<'_> {
         };
 
         let Some(func) = self.global.prog.find_function(call_to) else {
-            return self.handle_std_call(state, statement, &call_to, implicit_flow);
+            return self.handle_std_call(state, statement, call_to, implicit_flow);
         };
         if call_to == self.func.name {
             todo!("what about recurisve calls??");
@@ -591,7 +555,7 @@ impl LocalAnalysis<'_> {
             return self.output_tainted(state, statement);
         }
 
-        let calling_context = self.build_calling_ctxt_for(state, statement, &call_to, args);
+        let calling_context = self.build_calling_ctxt_for(state, call_to, args);
         let callee_ptr = self
             .global
             .facts
@@ -621,10 +585,6 @@ impl LocalAnalysis<'_> {
                     state.insert(loc);
                 }
             }
-        }
-
-        for i in res.iter() {
-            // println!("{i} is tainted on return!");
         }
 
         // Otherwise, recur into the call...
@@ -662,13 +622,7 @@ impl dataflow::Analysis for LocalAnalysis<'_> {
         statement: &super::types::Statement,
         loc: super::types::Location,
     ) {
-        for s in state.iter() {
-            // println!("\t{s} is tainted!");
-        }
-
-        // println!("analyzing statment {statement}");
-
-        let implicit_flow = self.implicit_flow_for_block(state, &loc.block);
+        let implicit_flow = self.implicit_flow_for_block(state, loc.block);
 
         match statement.rvalue {
             Rvalue::Binop { .. }
@@ -680,7 +634,7 @@ impl dataflow::Analysis for LocalAnalysis<'_> {
                     .rvalue
                     .places()
                     .iter()
-                    .any(detect::place_could_be_tainted(&state, self.facts.ptr()))
+                    .any(detect::place_could_be_tainted(state, self.facts.ptr()))
                     || implicit_flow.is_some()
                 {
                     for memloc in self.facts.ptr().could_refer_to(&statement.place) {
@@ -698,9 +652,9 @@ impl dataflow::Analysis for LocalAnalysis<'_> {
 
     fn handle_terminator(
         &self,
-        state: &mut Self::Domain,
-        terminator: &super::types::Terminator,
-        loc: super::types::Location,
+        _state: &mut Self::Domain,
+        _terminator: &super::types::Terminator,
+        _loc: super::types::Location,
     ) {
         // Don't do anything here...
     }

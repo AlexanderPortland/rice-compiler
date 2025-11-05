@@ -41,7 +41,7 @@ impl Program {
         let sym = sym.borrow();
         let matching = self
             .functions()
-            .into_iter()
+            .iter()
             .filter(|func| func.name == *sym)
             .collect::<Vec<_>>();
 
@@ -56,6 +56,7 @@ impl Program {
         Some(matching[0])
     }
 
+    #[must_use]
     pub fn main_function(&self) -> &Function {
         self.find_function(Symbol::main())
             .expect("we should have a main function")
@@ -433,6 +434,7 @@ impl Operand {
         }
     }
 
+    #[must_use]
     pub fn places(&self) -> Option<Vec<Place>> {
         self.as_place().map(|place| {
             {
@@ -440,7 +442,7 @@ impl Operand {
                     place
                         .projection
                         .iter()
-                        .flat_map(ProjectionElem::places)
+                        .filter_map(ProjectionElem::places)
                         .flatten(),
                 )
             }
@@ -547,7 +549,7 @@ impl Rvalue {
                 AllocArgs::Repeated { op, count } => op
                     .places()
                     .into_iter()
-                    .chain(count.places().into_iter())
+                    .chain(count.places())
                     .flatten()
                     .collect(),
             },
@@ -563,7 +565,7 @@ impl Rvalue {
             Rvalue::Binop { left, right, .. } => left
                 .places()
                 .into_iter()
-                .chain(right.places().into_iter())
+                .chain(right.places())
                 .flatten()
                 .collect(),
         }
@@ -587,6 +589,7 @@ impl Terminator {
         &mut self.kind
     }
 
+    #[must_use]
     pub fn places(&self) -> SmallVec<[Place; 2]> {
         match &self.kind {
             TerminatorKind::Return(op) | TerminatorKind::CondJump { cond: op, .. } => {
@@ -652,14 +655,15 @@ impl Place {
         }))
     }
 
+    #[must_use]
     pub fn places(&self) -> Vec<Place> {
-        let res = [*self]
+        [*self]
             .into_iter()
             .chain(
                 self.projection
                     .iter()
-                    .flat_map(|proj| {
-                        if let ProjectionElem::Index { index, ty } = proj {
+                    .filter_map(|proj| {
+                        if let ProjectionElem::Index { index, .. } = proj {
                             index.places()
                         } else {
                             None
@@ -667,9 +671,7 @@ impl Place {
                     })
                     .flatten(),
             )
-            .collect();
-        // println!("place {self} has places {:?}", res);
-        res
+            .collect()
     }
 
     #[must_use]
@@ -695,10 +697,11 @@ pub enum ProjectionElem {
 }
 
 impl ProjectionElem {
+    #[must_use]
     pub fn places(&self) -> Option<Vec<Place>> {
         match self {
-            Self::Field { index, ty } => None,
-            Self::Index { index, ty } => index.places(),
+            Self::Field { .. } => None,
+            Self::Index { index, .. } => index.places(),
         }
     }
 }

@@ -341,6 +341,7 @@ impl Visit for LocalVisitor {
 struct LocalUpdater<'z>(&'z dyn Fn(LocalIdx) -> LocalIdx);
 
 impl VisitMut for LocalUpdater<'_> {
+    #[allow(clippy::only_used_in_recursion)]
     fn visit_place(&mut self, place: &mut crate::bc::types::Place, loc: Location) {
         let new_local = self.0(place.local);
 

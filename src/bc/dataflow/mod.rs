@@ -95,6 +95,7 @@ pub fn analyze_to_fixpoint<A: Analysis>(analysis: &A, func: &Function) -> Analys
     state
 }
 
+#[allow(clippy::needless_pass_by_value)]
 /// Gets the analysis state joined across all returns
 pub fn join_ret_locations<A: Analysis>(
     analysis: &A,

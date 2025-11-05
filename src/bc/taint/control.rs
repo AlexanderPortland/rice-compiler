@@ -37,6 +37,7 @@ impl ControlDependencies {
         ControlDependencies(g)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn from_post_dominators(
         pdom: Dominators<NodeIndex>,
         reverse_cfg: &Graph<BlockKind, ()>,

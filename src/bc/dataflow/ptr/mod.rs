@@ -41,6 +41,7 @@ impl PointerAnalysis {
 
     /// The list of all allocations that can be reached with additional projections
     /// from a given starting place.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn reachable_memlocs(&self, p: &Place) -> HashSet<MemLoc> {
         let memlocs = self.could_refer_to(p);
 
@@ -50,7 +51,7 @@ impl PointerAnalysis {
                 self.points_to
                     .get(memloc)
                     .into_iter()
-                    .flat_map(|v| v.iter())
+                    .flat_map(IndexSet::iter)
             })
             .collect::<Vec<_>>();
         let mut collect: HashSet<MemLoc> = memlocs.into_iter().collect();
@@ -146,7 +147,7 @@ impl PointerAnalysis {
         let alias = MemLoc::Local(place.local);
         let then_project = &place.projection;
 
-        self.could_refer_to_inner(vec![alias.clone()], then_project)
+        self.could_refer_to_inner(vec![alias], then_project)
     }
 
     // Find the allocations that `ptrs` could refer to and project into them, repeating until `proj` is empty.

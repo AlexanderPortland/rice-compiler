@@ -20,7 +20,7 @@ use crate::{
 
 pub struct Facts {
     ptr: PointerAnalysis,
-    _const: AnalysisState<ConstAnalysis>,
+    constant: AnalysisState<ConstAnalysis>,
     control: ControlDependencies,
     domains: Domains,
 }
@@ -42,8 +42,8 @@ impl Facts {
         &self.control
     }
 
-    pub fn _const(&self) -> &AnalysisState<ConstAnalysis> {
-        &self._const
+    pub fn constant(&self) -> &AnalysisState<ConstAnalysis> {
+        &self.constant
     }
 }
 
@@ -65,24 +65,15 @@ pub fn intraprocedural_facts(prog: &Program) -> HashMap<Symbol, Facts> {
 }
 
 fn generate_facts(func: &Function) -> Facts {
-    let _const = dataflow::analyze_to_fixpoint(&dataflow::r#const::ConstAnalysis, func);
+    let constant = dataflow::analyze_to_fixpoint(&dataflow::r#const::ConstAnalysis, func);
     let ptr = dataflow::ptr::pointer_analysis(func);
     let control = control::control_dependencies(func);
 
-    // println!("POINTER REVIEW for {}", func.name);
-    for (loc, points_to) in ptr.points_to() {
-        for p in points_to.iter() {
-            // println!("{loc} -> {p:?}");
-        }
-    }
-
     Facts {
-        _const,
+        constant,
         control,
         domains: Domains {
-            memloc: Arc::new(IndexedDomain::from_iter(
-                all_memlocs(func, &ptr).into_iter(),
-            )),
+            memloc: Arc::new(IndexedDomain::from_iter(all_memlocs(func, &ptr))),
         },
         ptr,
     }

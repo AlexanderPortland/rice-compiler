@@ -5,25 +5,20 @@ use either::Either;
 use crate::bc::{
     dataflow::ptr::{
         PointerAnalysis,
-        types::{AllocProj, Allocation, MemLoc, PtrPlace},
+        types::{AllocProj, Allocation, MemLoc},
     },
-    types::{AllocArgs, AllocKind, Function, Place, Rvalue, Type, TypeKind},
-    visit::Visit,
+    types::{AllocArgs, AllocKind, Function, Rvalue, TypeKind},
 };
 
 pub fn all_memlocs(func: &Function, ptr: &PointerAnalysis) -> HashSet<MemLoc> {
-    let all_allocs: HashSet<Allocation> = ptr.alloc_domain().iter().cloned().collect();
+    let all_allocs: HashSet<Allocation> = ptr.alloc_domain().iter().copied().collect();
 
-    let mut all_memlocs: HashSet<MemLoc> = func
-        .locals
-        .indices()
-        .map(|local| MemLoc::Local(local))
-        .collect();
+    let mut all_memlocs: HashSet<MemLoc> = func.locals.indices().map(MemLoc::Local).collect();
 
     for alloc in all_allocs {
         match alloc {
-            Allocation::FromArg(arg, ty) => match ty.kind() {
-                TypeKind::Array(inner) => {
+            Allocation::FromArg(_arg, ty) => match ty.kind() {
+                TypeKind::Array(_inner) => {
                     all_memlocs.insert(MemLoc::Allocated(alloc, AllocProj::Index));
                 }
                 TypeKind::Tuple(inners) => {
@@ -36,7 +31,7 @@ pub fn all_memlocs(func: &Function, ptr: &PointerAnalysis) -> HashSet<MemLoc> {
             },
             Allocation::Real(loc) => {
                 if let Either::Left(l) = func.body.instr(loc)
-                    && let Rvalue::Alloc { kind, loc, args } = &l.rvalue
+                    && let Rvalue::Alloc { kind, args, .. } = &l.rvalue
                 {
                     match kind {
                         AllocKind::Array => {
@@ -50,26 +45,13 @@ pub fn all_memlocs(func: &Function, ptr: &PointerAnalysis) -> HashSet<MemLoc> {
                                 all_memlocs.insert(MemLoc::Allocated(alloc, AllocProj::Field(i)));
                             }
                         }
-                        _ => todo!("handle structs"),
                     }
                 } else {
                     panic!("should always have allocs at the location for an alloc");
                 }
             }
-        };
+        }
     }
 
     all_memlocs
-}
-
-struct PlaceVisitor(HashSet<Place>);
-
-impl Visit for PlaceVisitor {
-    fn visit_rvalue_place(&mut self, _place: &Place, _loc: crate::bc::types::Location) {
-        self.0.extend(_place.places());
-    }
-
-    fn visit_lvalue(&mut self, place: &Place, _loc: crate::bc::types::Location) {
-        self.0.extend(place.places());
-    }
 }
