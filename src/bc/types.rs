@@ -553,8 +553,14 @@ impl Rvalue {
                     .flatten()
                     .collect(),
             },
-            Rvalue::Call { args: ops, .. } | Rvalue::Closure { env: ops, .. } => {
-                ops.iter().filter_map(Operand::places).flatten().collect()
+            Rvalue::Call { args, f } => args
+                .iter()
+                .chain([f])
+                .filter_map(Operand::places)
+                .flatten()
+                .collect(),
+            Rvalue::Closure { env, .. } => {
+                env.iter().filter_map(Operand::places).flatten().collect()
             }
             Rvalue::MethodCall { receiver, args, .. } => args
                 .iter()

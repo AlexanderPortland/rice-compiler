@@ -444,7 +444,7 @@ impl<'a> LowerBody<'a> {
                 let projected = place.extend_projection(
                     [ProjectionElem::Field {
                         index: *i,
-                        ty: e.ty,
+                        ty: expr.ty,
                     }],
                     expr.ty,
                 );
@@ -459,9 +459,9 @@ impl<'a> LowerBody<'a> {
                 let projected = place.extend_projection(
                     [ProjectionElem::Index {
                         index: tmp,
-                        ty: e.ty,
+                        ty: expr.ty,
                     }],
-                    e.ty,
+                    expr.ty,
                 );
 
                 add_assign!(bc::Rvalue::Operand(bc::Operand::Place(projected)));
@@ -543,19 +543,19 @@ impl<'a> LowerBody<'a> {
     fn lower_place_impl(&mut self, e: &tir::Expr, proj: &mut Vec<bc::ProjectionElem>) -> LocalIdx {
         match &e.kind {
             tir::ExprKind::Var(name) => self.get_local(*name, e.ty),
-            tir::ExprKind::Project { e, i } => {
+            tir::ExprKind::Project { e: inner, i } => {
                 proj.push(bc::ProjectionElem::Field {
                     index: *i,
                     ty: e.ty,
                 });
-                self.lower_place_impl(e, proj)
+                self.lower_place_impl(inner, proj)
             }
-            tir::ExprKind::Index { e, i } => {
+            tir::ExprKind::Index { e: inner, i } => {
                 proj.push(bc::ProjectionElem::Index {
                     index: self.lower_expr_into_tmp(i),
                     ty: e.ty,
                 });
-                self.lower_place_impl(e, proj)
+                self.lower_place_impl(inner, proj)
             }
             _ => panic!("invalid place: {e:?}"),
         }

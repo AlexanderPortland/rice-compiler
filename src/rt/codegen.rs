@@ -439,34 +439,34 @@ impl CodegenFunc<'_, '_> {
             self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
             instrs.local_set(p.local.raw());
         } else {
-            instrs.local_get(p.local.raw());
-            for elem in &p.projection[..p.projection.len() - 1] {
-                match elem {
-                    bc::ProjectionElem::Field { index, ty } => {
-                        instrs.struct_get(
-                            self.module.tuple_ty_idx(*ty),
-                            u32::try_from(*index).unwrap(),
-                        );
-                    }
-                    bc::ProjectionElem::Index { index, ty } => {
-                        self.gen_operand(index, instrs);
-                        instrs.array_get(self.module.array_ty_idx(*ty));
-                    }
-                }
-            }
+            // for elem in &p.projection[..p.projection.len() - 1] {
+            //     match elem {
+            //         bc::ProjectionElem::Field { index, ty } => {
+            //             instrs.struct_get(
+            //                 self.module.tuple_ty_idx(*ty),
+            //                 u32::try_from(*index).unwrap(),
+            //             );
+            //         }
+            //         bc::ProjectionElem::Index { index, ty } => {
+            //             self.gen_operand(index, instrs);
+            //             instrs.array_get(self.module.array_ty_idx(*ty));
+            //         }
+            //     }
+            // }
 
+            let cur_ty = self.gen_load(p.local, &p.projection[..p.projection.len() - 1], instrs);
             match p.projection.last().unwrap() {
-                bc::ProjectionElem::Field { index, ty } => {
+                bc::ProjectionElem::Field { index, .. } => {
                     self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
                     instrs.struct_set(
-                        self.module.tuple_ty_idx(*ty),
-                        u32::try_from(*index).unwrap(),
+                        self.module.tuple_ty_idx(cur_ty),
+                        u32::try_from(*index).expect("field index > u32::MAX"),
                     );
                 }
-                bc::ProjectionElem::Index { index, ty } => {
+                bc::ProjectionElem::Index { index, .. } => {
                     self.gen_operand(index, instrs);
                     self.gen_rvalue(&stmt.rvalue, stmt.place.ty, instrs);
-                    instrs.array_set(self.module.array_ty_idx(*ty));
+                    instrs.array_set(self.module.array_ty_idx(cur_ty));
                 }
             }
         }
@@ -500,7 +500,9 @@ impl CodegenFunc<'_, '_> {
                     instrs.call(alloc_idx);
                 }
             },
-            bc::Operand::Place(p) => self.gen_load(*p, instrs),
+            bc::Operand::Place(p) => {
+                self.gen_load(p.local, &p.projection, instrs);
+            }
             bc::Operand::Func { f, ty } => {
                 self.gen_rvalue(&bc::Rvalue::Closure { f: *f, env: vec![] }, *ty, instrs);
             }
@@ -680,23 +682,32 @@ impl CodegenFunc<'_, '_> {
         }
     }
 
-    fn gen_load(&mut self, place: bc::Place, instrs: &mut InstructionSink) {
-        instrs.local_get(place.local.raw());
-        for elem in &place.projection {
+    fn gen_load(
+        &mut self,
+        local: bc::LocalIdx,
+        projection: &[bc::ProjectionElem],
+        instrs: &mut InstructionSink,
+    ) -> bc::Type {
+        instrs.local_get(local.raw());
+        let mut cur_ty = self.input_func.locals.value(local).ty;
+        for elem in projection {
             match elem {
                 bc::ProjectionElem::Field { index, ty } => {
                     instrs.struct_get(
-                        self.module.tuple_ty_idx(*ty),
-                        u32::try_from(*index).expect("shouldn't have numbers this big"),
+                        self.module.tuple_ty_idx(cur_ty),
+                        u32::try_from(*index).expect("field index > u32::MAX"),
                     );
+                    cur_ty = *ty;
                 }
 
                 bc::ProjectionElem::Index { index, ty } => {
                     self.gen_operand(index, instrs);
-                    instrs.array_get(self.module.array_ty_idx(*ty));
+                    instrs.array_get(self.module.array_ty_idx(cur_ty));
+                    cur_ty = *ty;
                     // todo!("not doing wasm yet");
                 }
             }
         }
+        cur_ty
     }
 }
