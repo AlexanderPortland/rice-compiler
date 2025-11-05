@@ -16,7 +16,7 @@ use crate::bc::{
 };
 
 pub mod escape;
-mod types;
+pub mod types;
 
 /// Conceptually should also
 pub fn pointer_analysis(func: &Function) -> PointerAnalysis {
@@ -39,6 +39,43 @@ impl PointerAnalysis {
         }
     }
 
+    /// The list of all allocations that can be reached with additional projections
+    /// from a given starting place.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn reachable_memlocs(&self, p: &Place) -> HashSet<MemLoc> {
+        let memlocs = self.could_refer_to(p);
+
+        let mut to_visit = memlocs
+            .iter()
+            .flat_map(|memloc| {
+                self.points_to
+                    .get(memloc)
+                    .into_iter()
+                    .flat_map(IndexSet::iter)
+            })
+            .collect::<Vec<_>>();
+        let mut collect: HashSet<MemLoc> = memlocs.into_iter().collect();
+        let mut visited = HashSet::new();
+
+        while let Some(visit) = to_visit.pop() {
+            if !visited.insert(visit) {
+                /// Get all memlocs reachable from this allocation
+                for (memloc, points_to) in &self.points_to {
+                    if let MemLoc::Allocated(alloc, _) = memloc
+                        && alloc == visit
+                    {
+                        collect.insert(*memloc);
+                        to_visit.extend(points_to.iter());
+                    }
+                }
+            }
+        }
+
+        // println!("found {collect:?}");
+
+        collect
+    }
+
     // NOTE: implemented this for like no reason bc i thought maybe it'd be useful in the future
     // and then it was a cool challenge to think about.
     pub fn with_function_arguments(
@@ -51,7 +88,7 @@ impl PointerAnalysis {
             .iter()
             .filter(|alloc| match alloc {
                 Allocation::Real(_) => true,
-                Allocation::FromArg(_) => false,
+                Allocation::FromArg(_, _) => false,
             })
             .chain(arguments.iter().map(|(place, alloc)| alloc))
             .copied();
@@ -88,7 +125,7 @@ impl PointerAnalysis {
     ) -> Result<Allocation, String> {
         match alloc {
             Allocation::Real(_) => Ok(*alloc),
-            Allocation::FromArg(place) => replace
+            Allocation::FromArg(place, ty) => replace
                 .get(place)
                 .ok_or(format!("no replacement found for arg place {place}"))
                 .cloned(),
@@ -110,7 +147,7 @@ impl PointerAnalysis {
         let alias = MemLoc::Local(place.local);
         let then_project = &place.projection;
 
-        self.could_refer_to_inner(vec![alias.clone()], then_project)
+        self.could_refer_to_inner(vec![alias], then_project)
     }
 
     // Find the allocations that `ptrs` could refer to and project into them, repeating until `proj` is empty.
@@ -182,7 +219,7 @@ fn handle_argument_alloc(
 ) {
     match of_ty.kind() {
         crate::bc::types::TypeKind::Array(inner_ty) => {
-            let array_alloc = Allocation::from_arg(to_place);
+            let array_alloc = Allocation::from_arg(to_place, of_ty);
             el_constraints.push((array_alloc, to_place.into()));
 
             handle_argument_alloc(
@@ -193,7 +230,7 @@ fn handle_argument_alloc(
             );
         }
         crate::bc::types::TypeKind::Tuple(inner_tys) => {
-            let array_alloc = Allocation::from_arg(to_place);
+            let array_alloc = Allocation::from_arg(to_place, of_ty);
             el_constraints.push((array_alloc, to_place.into()));
 
             for (i, inner) in inner_tys.iter().enumerate() {

@@ -14,6 +14,7 @@ use dataflow::dead_code::eliminate_dead_code;
 mod dataflow;
 mod lower;
 mod print;
+mod taint;
 pub mod types;
 mod visit;
 
@@ -28,8 +29,14 @@ pub enum OptLevel {
 }
 
 /// Run correctness analyses on the whole program.
-pub fn analyze(_prog: &Program) -> Result<()> {
-    Ok(())
+pub fn analyze(prog: &Program) -> Result<()> {
+    // Only do our taint analysis if we have any secure functions.
+    // TODO: should remove this to make sure we're handling taint analysis well generally
+    if prog.functions().iter().any(Function::secure) {
+        taint::check_taints(prog)
+    } else {
+        miette::Result::Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]

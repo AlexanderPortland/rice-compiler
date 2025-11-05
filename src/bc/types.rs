@@ -1,6 +1,6 @@
 //! Type definitions for the bytecode.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Borrow, collections::HashMap, sync::Arc};
 
 use either::Either;
 use indexical::IndexedDomain;
@@ -34,6 +34,32 @@ impl Program {
     #[must_use]
     pub fn functions(&self) -> &[Function] {
         &self.0
+    }
+
+    /// NOTE: returns none if the function's defined within the standard library.
+    pub fn find_function(&self, sym: impl Borrow<Symbol>) -> Option<&Function> {
+        let sym = sym.borrow();
+        let matching = self
+            .functions()
+            .iter()
+            .filter(|func| func.name == *sym)
+            .collect::<Vec<_>>();
+
+        if matching.is_empty() {
+            return None;
+        }
+
+        assert!(
+            matching.len() == 1,
+            "we should only have a single function named, {sym}"
+        );
+        Some(matching[0])
+    }
+
+    #[must_use]
+    pub fn main_function(&self) -> &Function {
+        self.find_function(Symbol::main())
+            .expect("we should have a main function")
     }
 
     pub fn functions_mut(&mut self) -> &mut [Function] {
@@ -409,6 +435,22 @@ impl Operand {
     }
 
     #[must_use]
+    pub fn places(&self) -> Option<Vec<Place>> {
+        self.as_place().map(|place| {
+            {
+                [place].into_iter().chain(
+                    place
+                        .projection
+                        .iter()
+                        .filter_map(ProjectionElem::places)
+                        .flatten(),
+                )
+            }
+            .collect()
+        })
+    }
+
+    #[must_use]
     pub fn as_place(&self) -> Option<Place> {
         match self {
             Operand::Place(p) => Some(*p),
@@ -499,26 +541,32 @@ impl Rvalue {
     #[must_use]
     pub fn places(&self) -> SmallVec<[Place; 2]> {
         match self {
-            Rvalue::Operand(op) | Rvalue::Cast { op, .. } => op.as_place().into_iter().collect(),
+            Rvalue::Operand(op) | Rvalue::Cast { op, .. } => {
+                op.places().into_iter().flatten().collect()
+            }
             Rvalue::Alloc { args, .. } => match args {
-                AllocArgs::Lit(ops) => ops.iter().filter_map(Operand::as_place).collect(),
-                AllocArgs::Repeated { op, count } => vec![op.as_place(), count.as_place()]
+                AllocArgs::Lit(ops) => ops.iter().filter_map(Operand::places).flatten().collect(),
+                AllocArgs::Repeated { op, count } => op
+                    .places()
                     .into_iter()
+                    .chain(count.places())
                     .flatten()
                     .collect(),
             },
             Rvalue::Call { args: ops, .. } | Rvalue::Closure { env: ops, .. } => {
-                ops.iter().filter_map(Operand::as_place).collect()
+                ops.iter().filter_map(Operand::places).flatten().collect()
             }
             Rvalue::MethodCall { receiver, args, .. } => args
                 .iter()
                 .chain([receiver])
-                .filter_map(Operand::as_place)
+                .filter_map(Operand::places)
+                .flatten()
                 .collect(),
             Rvalue::Binop { left, right, .. } => left
-                .as_place()
+                .places()
                 .into_iter()
-                .chain(right.as_place())
+                .chain(right.places())
+                .flatten()
                 .collect(),
         }
     }
@@ -539,6 +587,16 @@ impl Terminator {
 
     pub fn kind_mut(&mut self) -> &mut TerminatorKind {
         &mut self.kind
+    }
+
+    #[must_use]
+    pub fn places(&self) -> SmallVec<[Place; 2]> {
+        match &self.kind {
+            TerminatorKind::Return(op) | TerminatorKind::CondJump { cond: op, .. } => {
+                op.as_place().into_iter().collect()
+            }
+            TerminatorKind::Jump(_) => SmallVec::new(),
+        }
     }
 }
 
@@ -598,6 +656,25 @@ impl Place {
     }
 
     #[must_use]
+    pub fn places(&self) -> Vec<Place> {
+        [*self]
+            .into_iter()
+            .chain(
+                self.projection
+                    .iter()
+                    .filter_map(|proj| {
+                        if let ProjectionElem::Index { index, .. } = proj {
+                            index.places()
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten(),
+            )
+            .collect()
+    }
+
+    #[must_use]
     pub fn extend_projection(
         self,
         elems: impl IntoIterator<Item = ProjectionElem>,
@@ -617,4 +694,14 @@ pub enum ProjectionElem {
 
     /// Index into a fixed-size array.
     Index { index: Operand, ty: Type },
+}
+
+impl ProjectionElem {
+    #[must_use]
+    pub fn places(&self) -> Option<Vec<Place>> {
+        match self {
+            Self::Field { .. } => None,
+            Self::Index { index, .. } => index.places(),
+        }
+    }
 }

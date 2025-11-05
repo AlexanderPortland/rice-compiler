@@ -1,0 +1,12 @@
+#[secure] fn secure() -> int { 0 }
+
+fn main() {
+    let p = secure() in
+    if p == 0 {
+        let x = 10 in
+        let y = x + 3 in
+        x + y;
+        ()
+    };
+    println("Done!")
+}

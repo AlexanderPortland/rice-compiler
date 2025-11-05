@@ -35,13 +35,13 @@ fn compile(path: &Path, args: &str) -> Result<CompilerOutput> {
     let mut cmd = Command::new("./target/debug/rice");
     cmd.arg(path);
     cmd.args(shlex::split(args).unwrap());
-    println!("running command {:?}", cmd);
+    // println!("running command {:?}", cmd);
     let output = cmd.output()?;
     let success = output.status.success();
 
     let stats = success.then(|| get_bytecode_stats(path, args));
 
-    println!("stats got");
+    // println!("stats got");
 
     Ok(CompilerOutput {
         success: output.status.success(),

@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = true
+stdout = '''
+0
+'''
+stderr = ''
+
+[stats]
+bc_stmts = 8
+bc_locals = 9
+bc_blocks = 3
+exec_calls = 6
+exec_steps = 9

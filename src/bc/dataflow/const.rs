@@ -1,7 +1,7 @@
 use crate::{
     ast::types as ast,
     bc::{
-        dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
+        dataflow::{self, Analysis, AnalysisState, JoinSemiLattice, analyze_to_fixpoint},
         types::{
             Binop, Const, Function, Local, Location, Operand, Rvalue, Statement, TerminatorKind,
             Type,

@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × illegal call to function `println` with tainted values
+   ╭─[taint_capture_fail.rice:6:3]
+ 5 │   let f = \() -> _. x in
+ 6 │   println(int_to_string(f()))
+   ·   ───────────────────────────
+ 7 │ }
+   ╰────
+
+'''

@@ -1,4 +1,3 @@
-#![deny(warnings)]
 #![warn(clippy::pedantic)]
 #![allow(
     clippy::write_with_newline,
@@ -7,7 +6,8 @@
     clippy::missing_panics_doc,
     clippy::unnecessary_wraps,
     clippy::cast_precision_loss,
-    rustdoc::private_intra_doc_links
+    rustdoc::private_intra_doc_links,
+    clippy::must_use_candidate
 )]
 
 use lalrpop_util::lalrpop_mod;

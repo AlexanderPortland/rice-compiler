@@ -1,0 +1,19 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × illegal call to function `println` control dependent on tainted values
+   ╭─[handout_implicit.rice:5:5]
+ 4 │          let p = secure() in
+ 5 │ ╭──▶     if p == 0 {
+ 6 │ ││           println("Done!")
+ 7 │ ├──▶     }
+   · ╰───── from here
+   · ╰───── to here
+ 8 │      }
+   ╰────
+
+'''

@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × illegal call to function `println` with tainted values
+    ╭─[taint_simple_fail2.rice:9:3]
+  8 │   let b = (a + 1) as float in
+  9 │   println(float_to_string(b))  
+    ·   ───────────────────────────
+ 10 │ }
+    ╰────
+
+'''
