@@ -127,6 +127,12 @@ impl Function {
     pub fn secure(&self) -> bool {
         self.annots.iter().any(|annot| annot.name == "secure")
     }
+
+    /// Returns true if the function is annotated with `#[symex]`.
+    #[must_use]
+    pub fn symex(&self) -> bool {
+        self.annots.iter().any(|annot| annot.name == "symex")
+    }
 }
 
 pub type Cfg = DiGraph<BasicBlock, ()>;
@@ -157,6 +163,16 @@ impl Body {
             cfg,
             locations,
             rpo,
+        }
+    }
+
+    pub fn entry_loc(&self) -> Location {
+        Location {
+            block: self
+                .blocks()
+                .next()
+                .expect("every function should have at least one block"),
+            instr: 0,
         }
     }
 

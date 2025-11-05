@@ -17,6 +17,7 @@ pub mod bc;
 pub mod rt;
 #[allow(clippy::all, clippy::pedantic)]
 pub mod stdlib;
+pub mod symex;
 pub mod tir;
 pub mod utils;
 

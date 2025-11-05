@@ -4,6 +4,7 @@ use rice::{
     ast::Input,
     bc::{OptLevel, OptimizeOptions, types as bc},
     rt::{Runtime, RuntimeOptions},
+    symex::{SymexOptions, symex_func},
     tir::Tcx,
     utils::Symbol,
 };
@@ -18,6 +19,12 @@ use std::{
 enum Command {
     /// Execute the source file.
     Exec,
+    /// Symbolically execute the source file to detect assertion failures.
+    Symex {
+        /// The maximum number of steps for symbolic execution.
+        #[arg(long, default_value = "50")]
+        max_steps: usize,
+    },
 }
 
 #[derive(Parser)]
@@ -79,6 +86,7 @@ fn run(args: &Args, input: &Input) -> Result<()> {
     match &args.command {
         None | Some(Command::Exec) => exec(args, tcx, bc),
         // add additional commands here
+        Some(Command::Symex { max_steps }) => symex(args, tcx, bc, *max_steps),
     }
 }
 
@@ -95,6 +103,15 @@ fn exec(args: &Args, tcx: Tcx, bc: bc::Program) -> Result<()> {
         Ok(())
     }
     exec(args, tcx, bc).map_err(|e| miette!("{e:?}"))
+}
+
+fn symex(args: &Args, tcx: Tcx, bc: bc::Program, max_steps: usize) -> Result<()> {
+    let opts = SymexOptions { max_steps };
+
+    for func in bc.into_functions().into_iter().filter(|func| func.symex()) {
+        symex_func(func, &opts)?;
+    }
+    Ok(())
 }
 
 fn dump_ir<T: Serialize>(t: &T, input: &Input, ext: &str) -> Result<()> {
