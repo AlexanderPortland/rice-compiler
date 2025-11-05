@@ -30,7 +30,12 @@ pub enum OptLevel {
 
 /// Run correctness analyses on the whole program.
 pub fn analyze(prog: &Program) -> Result<()> {
-    taint::check_taints(prog)
+    // Only do our taint analysis if we have any secure functions.
+    if prog.functions().iter().any(|func| func.secure()) {
+        taint::check_taints(prog)
+    } else {
+        miette::Result::Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]

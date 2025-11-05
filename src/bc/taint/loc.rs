@@ -42,7 +42,7 @@ pub fn all_memlocs(func: &Function, ptr: &PointerAnalysis) -> HashSet<MemLoc> {
                         AllocKind::Array => {
                             all_memlocs.insert(MemLoc::Allocated(alloc, AllocProj::Index));
                         }
-                        AllocKind::Tuple => {
+                        AllocKind::Tuple | AllocKind::Struct => {
                             let AllocArgs::Lit(inners) = args else {
                                 panic!("can only have literal tuples");
                             };

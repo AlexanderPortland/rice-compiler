@@ -326,7 +326,9 @@ fn map_arg_place(
                 }))
                 .collect()
         }
-        TypeKind::Struct(inners) => todo!(),
+        TypeKind::Struct(inners) => {
+            todo!()
+        }
         _ => [(*arg_place, to_place)].into_iter().collect(),
     }
 }
@@ -386,7 +388,8 @@ impl LocalAnalysis<'_> {
         };
 
         match (kind, args) {
-            (AllocKind::Tuple, AllocArgs::Lit(literals)) => {
+            (AllocKind::Tuple, AllocArgs::Lit(literals))
+            | (AllocKind::Struct, AllocArgs::Lit(literals)) => {
                 // For each literal, mark the corresponding memloc as tainted if the operand is tainted
                 for (i, lit) in literals.iter().enumerate() {
                     if detect::op_could_be_tainted(&state, self.facts.ptr())(lit)
@@ -537,6 +540,30 @@ impl LocalAnalysis<'_> {
         ctxt
     }
 
+    fn handle_unknown_call(&self, state: &mut TaintedPlaces, statement: &super::types::Statement) {
+        let Rvalue::Call { f, args } = &statement.rvalue else {
+            unreachable!();
+        };
+
+        for a in args {
+            if let Operand::Place(p) = a {
+                for (sub_place, _) in map_arg_place(
+                    self.facts.ptr(),
+                    &(*p).into(),
+                    CalleePlace((*p).into()),
+                    &a.ty(),
+                ) {
+                    for loc in self.facts.ptr().could_refer_to(&sub_place) {
+                        state.insert(loc);
+                    }
+                }
+            }
+        }
+
+        self.output_tainted(state, statement);
+        // TODO: I think we need to deeply handle this here...
+    }
+
     fn handle_call(
         &self,
         state: &mut TaintedPlaces,
@@ -548,9 +575,9 @@ impl LocalAnalysis<'_> {
             unreachable!();
         };
 
-        let call_to = self
-            .track_call(f, loc)
-            .expect("should know all calls for now");
+        let Some(call_to) = self.track_call(f, loc) else {
+            return self.handle_unknown_call(state, statement);
+        };
 
         let Some(func) = self.global.prog.find_function(call_to) else {
             return self.handle_std_call(state, statement, &call_to, implicit_flow);
