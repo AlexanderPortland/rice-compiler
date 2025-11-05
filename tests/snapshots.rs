@@ -39,7 +39,8 @@ fn compile(path: &Path, args: &str) -> Result<CompilerOutput> {
     let output = cmd.output()?;
     let success = output.status.success();
 
-    let stats = success.then(|| get_bytecode_stats(path, args));
+    // Only get our bytecode stats if we're actually running the program and it was successful.
+    let stats = (success && !args.contains("symex")).then(|| get_bytecode_stats(path, args));
 
     // println!("stats got");
 
@@ -71,7 +72,7 @@ fn get_bytecode_stats(path: &Path, args: &str) -> CompilationStats {
                 .as_str()
                 .match_indices("] Initial BC:")
                 .last()
-                .expect("should have A bytecode output")
+                .expect("should have a bytecode output")
         });
     let start_i = start.0 + start.1.len();
 

@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_vars_fail.rice:6:3]
+ 5 │   x := y * 2;
+ 6 │   assert(x > 0)
+   ·   ──────┬──────
+   ·         ╰── here with inputs [x1 -> (- 1)]
+ 7 │ }
+   ╰────
+
+'''

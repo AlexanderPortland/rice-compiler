@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_simple_fail.rice:3:20]
+ 2 │     #[symex]
+ 3 │ ╭─▶ fn example(x: int) {
+ 4 │ │     assert(x == 0)
+ 5 │ ├─▶ }
+   · ╰──── here with inputs [x1 -> 1]
+   ╰────
+
+'''

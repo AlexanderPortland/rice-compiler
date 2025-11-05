@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_arith_fail.rice:6:3]
+ 5 │   let w = z * 2 in
+ 6 │   assert(w >= 0)
+   ·   ───────┬──────
+   ·          ╰── here with inputs [x1 -> 0,x2 -> (- 1)]
+ 7 │ }
+   ╰────
+
+'''
