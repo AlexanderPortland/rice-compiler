@@ -1,3 +1,4 @@
+use core::panic;
 use itertools::Itertools;
 use std::{
     collections::{HashMap, VecDeque, vec_deque},
@@ -10,7 +11,7 @@ use crate::{
     ast::types::Span,
     bc::types::{
         AllocArgs, BasicBlock, BasicBlockIdx, Binop, Const, Function, Local, LocalIdx, Location,
-        Operand, Place, Rvalue, Statement, Terminator, TerminatorKind, Type, TypeKind,
+        Operand, Place, Program, Rvalue, Statement, Terminator, TerminatorKind, Type, TypeKind,
     },
     utils::{Symbol, sym},
 };
@@ -25,9 +26,9 @@ pub struct SymexOptions {
     pub max_steps: usize,
 }
 
-pub fn symex_func(func: Function, opts: &SymexOptions) -> Result<()> {
+pub fn symex_func(func: &Function, in_prog: &Program, opts: &SymexOptions) -> Result<()> {
     // println!("[*] symex for func {}", func.name);
-    let mut configs = VecDeque::from(vec![SymexConfig::entry(&func)]);
+    let mut configs = VecDeque::from(vec![SymexConfig::entry(func, in_prog)]);
     // println!("initial configs {:#?}", configs);
 
     while let Some(step_next) = configs.pop_front() {
@@ -48,7 +49,12 @@ struct SymexConfig<'f> {
     /// The number of symbolic steps this config has taken.
     steps: usize,
     /// The function
-    func: &'f Function,
+    curr_func: &'f Function,
+
+    call_stack: Vec<(&'f Function, Location, HashMap<LocalIdx, StackVal>)>,
+
+    in_prog: &'f Program,
+
     inputs: HashMap<LocalIdx, symb::Dynamic>,
     /// The location of the instruction to execute next.
     next_instr: Location,
@@ -57,7 +63,7 @@ struct SymexConfig<'f> {
 }
 
 #[derive(Debug, Clone)]
-enum StackVal {
+pub enum StackVal {
     KnownClosure(Symbol),
     SymbVal(symb::Dynamic),
 }
@@ -135,7 +141,7 @@ pub fn symb_const(c: &Const) -> StackVal {
 
 impl<'f> SymexConfig<'f> {
     /// Constructs a config for right after entry to a function.
-    pub fn entry(func: &'f Function) -> Self {
+    pub fn entry(func: &'f Function, in_prog: &'f Program) -> Self {
         let mut stack = HashMap::new();
         let mut inputs = HashMap::new();
         for (local, ty) in func.params().skip(1) {
@@ -147,8 +153,10 @@ impl<'f> SymexConfig<'f> {
         SymexConfig {
             path: symb::Bool::from_bool(true),
             steps: 0,
-            func,
+            curr_func: func,
             inputs,
+            in_prog,
+            call_stack: Vec::new(),
             next_instr: func.body.entry_loc(),
             stack,
         }
@@ -229,7 +237,7 @@ impl<'f> SymexConfig<'f> {
 
     fn model_string(&self, model: z3::Model) -> String {
         let val_map = self
-            .func
+            .curr_func
             .params()
             .skip(1)
             .map(|(local, _ty)| {
@@ -272,12 +280,67 @@ impl<'f> SymexConfig<'f> {
         Ok(())
     }
 
+    pub fn call(mut self, f: Symbol, args: &[Operand]) -> Self {
+        let Some(new_func) = self.in_prog.find_function(f) else {
+            panic!("unknown call to {f}");
+        };
+
+        // let params = new_func.params().skip(1).enumerate().collect::<Vec<_>>();
+
+        // panic!("args to {f:?} are {args:?}, params are {params:?}");
+
+        let mut new_stack = HashMap::new();
+        for (i, (local, ty)) in new_func.params().skip(1).enumerate() {
+            new_stack.insert(local, self.symb_operand(&args[i]));
+        }
+
+        // panic!("args for {f:?} is {new_stack:?}");
+
+        // Save where to return to on the call stack
+        let ret_to = (
+            self.curr_func,
+            self.next_instr,
+            // This implicitly empties our current stack
+            std::mem::take(&mut self.stack),
+        );
+        self.call_stack.push(ret_to);
+        self.stack = new_stack;
+
+        self.curr_func = new_func;
+        self.next_instr = new_func.body.entry_loc();
+
+        self
+    }
+
+    fn ret_place(func: &'f Function, loc: Location) -> Place {
+        let ret_instr = func
+            .body
+            .instr(loc)
+            .left()
+            .expect("should be a statement at ret_loc");
+        let Rvalue::Call { f, args } = &ret_instr.rvalue else {
+            panic!("not a call rvalue at ret loc");
+        };
+        ret_instr.place
+    }
+
+    pub fn ret(mut self, op: &Operand) -> Option<Self> {
+        let Some((ret_func, ret_loc, ret_stack)) = self.call_stack.pop() else {
+            // Otherwise, we're returning from the main symex function, and don't have to do anything.
+            return None;
+        };
+        let ret_val = self.symb_operand(op);
+        self.curr_func = ret_func;
+        self.next_instr = ret_loc;
+        self.stack = ret_stack;
+        self.inc_instr();
+        self.assign_place(&Self::ret_place(ret_func, ret_loc), ret_val);
+
+        Some(self)
+    }
+
     /// Returns the value, and any new conditions added to the path if any
-    pub fn symb_rvalue(
-        &self,
-        rv: &Rvalue,
-        span: Span,
-    ) -> Result<(Option<StackVal>, Option<symb::Bool>)> {
+    pub fn symb_rvalue(&self, rv: &Rvalue) -> Result<(Option<StackVal>, Option<symb::Bool>)> {
         match rv {
             Rvalue::Operand(op) => Ok((Some(self.symb_operand(op).into()), None)),
             Rvalue::Binop { op, left, right } => Ok((Some(self.symb_binop(op, left, right)), None)),
@@ -288,19 +351,7 @@ impl<'f> SymexConfig<'f> {
                     panic!("closures w symex");
                 }
             }
-            Rvalue::Call { f, args } => {
-                let to = self.known_closure(f).expect("should know all closures");
-                if to == sym("assert") {
-                    self.handle_assert(
-                        args.first()
-                            .expect("assert should have at least one argument"),
-                        span,
-                    )?;
-                    Ok((None, None))
-                } else {
-                    todo!("hadnle calls");
-                }
-            }
+            Rvalue::Call { .. } => unreachable!("handled in step_stmt"),
             e => todo!("{e} nyi"),
         }
     }
@@ -315,18 +366,31 @@ impl<'f> SymexConfig<'f> {
     }
 
     pub fn inc_instr(&mut self) {
-        let mut next = self.func.body.successors(self.next_instr);
+        let mut next = self.curr_func.body.successors(self.next_instr);
         assert_eq!(next.len(), 1);
         self.next_instr = next.remove(0);
     }
 
     pub fn step_stmt(mut self, stmt: &'f Statement) -> Result<Self> {
-        // let new_val = match stmt.rvalue
+        if let Rvalue::Call { f, args } = &stmt.rvalue {
+            let to = self.known_closure(f).expect("should know all closures");
+            if to == sym("assert") {
+                self.handle_assert(
+                    args.first()
+                        .expect("assert should have at least one argument"),
+                    stmt.span,
+                )?;
+                return Ok(self);
+            } else {
+                return Ok(self.call(to, args));
+            }
+        }
+
         if !matches!(&stmt.rvalue, Rvalue::Alloc {
             args: AllocArgs::Lit(e), ..
         } if e.is_empty())
         {
-            let (new_val, path_ext) = self.symb_rvalue(&stmt.rvalue, stmt.span)?;
+            let (new_val, path_ext) = self.symb_rvalue(&stmt.rvalue)?;
             if let Some(path_ext) = path_ext {
                 self = self.assume(path_ext);
             }
@@ -346,10 +410,10 @@ impl<'f> SymexConfig<'f> {
                 // just set our next instruction to be there
                 Ok(SmallVec::from_elem(self.goto_block(j), 1))
             }
-            TerminatorKind::Return(_) => {
-                Ok(SmallVec::new())
-                // todo!("not totally sure how to handle return")
-            }
+            TerminatorKind::Return(op) => match self.ret(op) {
+                Some(more) => Ok(SmallVec::from_iter(std::iter::once(more))),
+                None => Ok(SmallVec::new()),
+            },
             TerminatorKind::CondJump {
                 cond,
                 true_,
@@ -373,7 +437,7 @@ impl SymexConfig<'_> {
     pub fn step(mut self) -> Result<SmallVec<[Self; 2]>> {
         self.steps += 1;
 
-        match self.func.body.instr(self.next_instr) {
+        match self.curr_func.body.instr(self.next_instr) {
             Left(stmt) => self
                 .step_stmt(stmt)
                 .map(|config| SmallVec::from_vec(vec![config])),

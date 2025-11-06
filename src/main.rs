@@ -108,8 +108,8 @@ fn exec(args: &Args, tcx: Tcx, bc: bc::Program) -> Result<()> {
 fn symex(args: &Args, tcx: Tcx, bc: bc::Program, max_steps: usize) -> Result<()> {
     let opts = SymexOptions { max_steps };
 
-    for func in bc.into_functions().into_iter().filter(|func| func.symex()) {
-        symex_func(func, &opts)?;
+    for func in bc.functions().into_iter().filter(|func| func.symex()) {
+        symex_func(func, &bc, &opts)?;
     }
     Ok(())
 }

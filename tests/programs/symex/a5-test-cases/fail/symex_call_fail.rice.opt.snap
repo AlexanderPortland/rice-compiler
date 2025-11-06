@@ -1,0 +1,18 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_call_fail.rice:5:20]
+ 4 │     #[symex]
+ 5 │ ╭─▶ fn example(n: int) {
+ 6 │ │     assert(add1(n) > 0)
+ 7 │ ├─▶ }
+   · ╰──── here with inputs [x1 -> (- 1)]
+ 8 │     
+   ╰────
+
+'''
