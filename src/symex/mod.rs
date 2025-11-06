@@ -176,7 +176,7 @@ impl<'f> SymexConfig<'f> {
         match op {
             Operand::Const(c) => symb_const(c),
             Operand::Place(p) => self.symb_place(p),
-            Operand::Func { .. } => todo!("dont have to handle this jawn"),
+            Operand::Func { f, .. } => StackVal::KnownClosure(*f),
         }
     }
 
