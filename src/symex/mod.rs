@@ -11,7 +11,8 @@ use crate::{
     ast::types::Span,
     bc::types::{
         AllocArgs, BasicBlock, BasicBlockIdx, Binop, Const, Function, Local, LocalIdx, Location,
-        Operand, Place, Program, Rvalue, Statement, Terminator, TerminatorKind, Type, TypeKind,
+        Operand, Place, Program, ProjectionElem, Rvalue, Statement, Terminator, TerminatorKind,
+        Type, TypeKind,
     },
     utils::{Symbol, sym},
 };
@@ -42,6 +43,63 @@ pub fn symex_func(func: &Function, in_prog: &Program, opts: &SymexOptions) -> Re
     Ok(())
 }
 
+#[derive(Debug, Default, Clone)]
+struct Heap(Vec<symb::Dynamic>);
+
+// type HeapPtrType = z3::Sort::new
+
+pub fn sort_from_ty(ty: Type) -> z3::Sort {
+    match ty.kind() {
+        TypeKind::Array(_) => z3::Sort::int(),
+        TypeKind::Tuple(_) | TypeKind::Struct(_) => {
+            todo!("dont have to handle any of these yet")
+        }
+        TypeKind::Int => z3::Sort::int(),
+        TypeKind::Bool => z3::Sort::bool(),
+        TypeKind::Float => z3::Sort::float32(),
+        TypeKind::Func { .. } | TypeKind::Self_ | TypeKind::Interface(_) => {
+            todo!("who the hell knows")
+        }
+        TypeKind::Hole(_) => unreachable!("holes should be removed during typechecking"),
+        TypeKind::String => todo!("should handle strings, but being lazy for now"),
+    }
+}
+
+impl Heap {
+    pub fn next_id(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn insert_el(&mut self, el: impl Into<symb::Dynamic>) -> symb::Dynamic {
+        self.0.push(el.into());
+        symb::Int::from_u64((self.0.len() - 1).try_into().unwrap()).into()
+    }
+
+    pub fn sym_var(&mut self, l: LocalIdx, ty: Type) -> symb::Dynamic {
+        let name = sym_var_name(l);
+        match ty.kind() {
+            TypeKind::Array(inner) => {
+                // get new unique heap id
+                let symb_arr = symb::Array::fresh_const(
+                    &("A".to_owned() + &sym_var_name(l)),
+                    &z3::Sort::int(),
+                    &sort_from_ty(*inner),
+                );
+                self.insert_el(symb_arr)
+            }
+            TypeKind::Tuple(_) | TypeKind::Struct(_) | TypeKind::Func { .. } => {
+                todo!("dont have to handle any of these yet")
+            }
+            TypeKind::Bool => symb::Bool::fresh_const(&name).into(),
+            TypeKind::Int => symb::Int::fresh_const(&name).into(),
+            TypeKind::String => todo!("should handle strings, but being lazy for now"),
+            TypeKind::Hole(_) => unreachable!("holes should be removed during typechecking"),
+            TypeKind::Float => symb::Float::fresh_const_float32(&name).into(),
+            TypeKind::Self_ | TypeKind::Interface(_) => todo!("don't have to handle these ever"),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct SymexConfig<'f> {
     /// The path taken by this config.
@@ -51,7 +109,10 @@ struct SymexConfig<'f> {
     /// The function
     curr_func: &'f Function,
 
+    // TODO: simplify curr_func, in_prog, and stack into this logic, making things cleaner.
     call_stack: Vec<(&'f Function, Location, HashMap<LocalIdx, StackVal>)>,
+
+    heap: Heap,
 
     in_prog: &'f Program,
 
@@ -115,21 +176,6 @@ pub fn sym_var_name(l: LocalIdx) -> String {
     format!("{l}")
 }
 
-pub fn sym_var(l: LocalIdx, ty: Type) -> symb::Dynamic {
-    let name = sym_var_name(l);
-    match ty.kind() {
-        TypeKind::Array(_) | TypeKind::Tuple(_) | TypeKind::Struct(_) | TypeKind::Func { .. } => {
-            todo!("dont have to handle any of these yet")
-        }
-        TypeKind::Bool => symb::Bool::fresh_const(&name).into(),
-        TypeKind::Int => symb::Int::fresh_const(&name).into(),
-        TypeKind::String => todo!("should handle strings, but being lazy for now"),
-        TypeKind::Hole(_) => unreachable!("holes should be removed during typechecking"),
-        TypeKind::Float => symb::Float::fresh_const_float32(&name).into(),
-        TypeKind::Self_ | TypeKind::Interface(_) => todo!("don't have to handle these ever"),
-    }
-}
-
 pub fn symb_const(c: &Const) -> StackVal {
     match c {
         Const::Bool(b) => symb::Bool::from_bool(*b).into(),
@@ -144,8 +190,9 @@ impl<'f> SymexConfig<'f> {
     pub fn entry(func: &'f Function, in_prog: &'f Program) -> Self {
         let mut stack = HashMap::new();
         let mut inputs = HashMap::new();
+        let mut heap = Heap::default();
         for (local, ty) in func.params().skip(1) {
-            let val = sym_var(local, ty);
+            let val = heap.sym_var(local, ty);
             inputs.insert(local, val.clone());
             stack.insert(local, val.into());
         }
@@ -156,6 +203,7 @@ impl<'f> SymexConfig<'f> {
             curr_func: func,
             inputs,
             in_prog,
+            heap,
             call_stack: Vec::new(),
             next_instr: func.body.entry_loc(),
             stack,
@@ -176,8 +224,41 @@ impl<'f> SymexConfig<'f> {
     }
 
     pub fn symb_place(&self, p: &Place) -> StackVal {
-        assert!(p.projection.is_empty());
-        self.stack[&p.local].clone()
+        let mut proj = p.projection.clone();
+        let mut current_val = self.stack[&p.local].clone();
+
+        while let Some(proj) = proj.pop() {
+            current_val = self.proj(current_val, proj);
+        }
+
+        current_val
+    }
+
+    fn proj(&self, val: StackVal, proj: ProjectionElem) -> StackVal {
+        let ptr_i = val
+            .expect_val()
+            .as_int()
+            .expect("ptr that is projected on should be an int index into the stack")
+            .as_u64()
+            .expect("should be const too");
+
+        let alloc = &self.heap.0[ptr_i as usize];
+
+        match proj {
+            ProjectionElem::Field { index, ty } => {
+                todo!()
+            }
+            ProjectionElem::Index { index, .. } => {
+                let index = self
+                    .symb_operand(&index)
+                    .expect_val()
+                    .as_int()
+                    .expect("index should be int");
+
+                let arr = alloc.as_array().expect("should be array");
+                StackVal::SymbVal(arr.select(&index))
+            }
+        }
     }
 
     pub fn symb_operand(&self, op: &Operand) -> StackVal {
@@ -214,6 +295,7 @@ impl<'f> SymexConfig<'f> {
 
         match (op, left.ty().kind()) {
             (Binop::Add, TypeKind::Int) => commute_binop!(as_int, Int, add),
+            (Binop::Sub, TypeKind::Int) => commute_binop!(as_int, Int, sub),
             (Binop::Mul, TypeKind::Int) => commute_binop!(as_int, Int, mul),
             (Binop::And, TypeKind::Bool) => commute_binop!(as_bool, Bool, and),
             (Binop::Eq, TypeKind::Bool) => dir_binop!(as_bool, eq),

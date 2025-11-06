@@ -1,0 +1,18 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_array_fail.rice:4:15]
+ 3 │     fn example(x: [int]) {
+ 4 │ ╭─▶   if x[0] > 0 {
+ 5 │ │       assert(x[1] - x[0] < 10)
+ 6 │ ├─▶   }
+   · ╰──── here with inputs [x1 -> 0]
+ 7 │     }
+   ╰────
+
+'''
