@@ -294,8 +294,11 @@ pub fn remove_unused_locals(func: &mut Function) -> bool {
     let new_local_domain = IndexedDomain::from_iter(new_locals);
 
     // Update all the local idxs in the function
-    let mut updater =
-        LocalUpdater(&|idx: LocalIdx| *mapping.get(&idx).expect("should have an entry"));
+    let mut updater = LocalUpdater(&|idx: LocalIdx| {
+        *mapping
+            .get(&idx)
+            .expect(&format!("should have an entry for {idx}"))
+    });
     updater.visit_function(func);
 
     // Then update the old domain to be the new one
@@ -330,11 +333,15 @@ impl Visit for LocalVisitor {
     }
 
     fn visit_lvalue(&mut self, place: &crate::bc::types::Place, _loc: Location) {
-        self.0.insert(place.local);
+        for p in place.places() {
+            self.0.insert(p.local);
+        }
     }
 
     fn visit_rvalue_place(&mut self, place: &crate::bc::types::Place, _loc: Location) {
-        self.0.insert(place.local);
+        for p in place.places() {
+            self.0.insert(p.local);
+        }
     }
 }
 
