@@ -1,0 +1,18 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_tuple_fail.rice:5:16]
+ 4 │       let t = (x.0 + x.1, x.0 - x.1) in
+ 5 │ ╭─▶   if x.0 < x.1 {
+ 6 │ │       assert(t.0 > t.1)
+ 7 │ ├─▶   }
+   · ╰──── here with inputs [x1 -> 0]
+ 8 │     }
+   ╰────
+
+'''

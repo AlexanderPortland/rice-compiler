@@ -7,13 +7,14 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
+use wasmparser::Name;
 
 use crate::{
     ast::types::Span,
     bc::types::{
-        AllocArgs, BasicBlock, BasicBlockIdx, Binop, Const, Function, Local, LocalIdx, Location,
-        Operand, Place, Program, ProjectionElem, Rvalue, Statement, Terminator, TerminatorKind,
-        Type, TypeKind,
+        AllocArgs, AllocKind, BasicBlock, BasicBlockIdx, Binop, Const, Function, Local, LocalIdx,
+        Location, Operand, Place, Program, ProjectionElem, Rvalue, Statement, Terminator,
+        TerminatorKind, Type, TypeKind,
     },
     utils::{Symbol, sym},
 };
@@ -90,22 +91,42 @@ impl Heap {
         symb::Int::from_u64((self.0.len() - 1).try_into().unwrap()).into()
     }
 
-    pub fn sym_var(&mut self, l: LocalIdx, ty: Type) -> symb::Dynamic {
-        let name = sym_var_name("", l);
+    pub fn sym_tup(&mut self, tys: &[Type], name: &str) -> symb::Datatype {
+        let sort = z3_dt_sort_for_tup(tys);
+        // println!("sort is {sort:?} for ty {ty:?}");
+        let mut symb_tup = symb::Datatype::fresh_const(&format!("T{name}"), &sort.sort);
+
+        // let accessors = &sort.variants.get(0).expect("one field").accessors;
+        // for (i, ty) in tys.iter().enumerate() {
+        //     let accessor = &accessors[i];
+        //     symb_tup = symb_tup.update_field(&accessor, &self.sym_var(&format!("{name}.{i}"), *ty));
+        // }
+
+        symb_tup
+    }
+
+    pub fn sym_var(&mut self, name: &str, ty: Type) -> symb::Dynamic {
         match ty.kind() {
             TypeKind::Array(inner) => {
                 // get new unique heap id
                 let symb_arr = symb::Array::fresh_const(
-                    &sym_var_name("A", l),
+                    &format!("A{name}"),
                     &z3::Sort::int(),
                     &sort_from_ty(*inner),
                 );
+
+                assert!(
+                    !matches!(
+                        inner.kind(),
+                        TypeKind::Array(_) | TypeKind::Tuple(_) | TypeKind::Struct(_)
+                    ),
+                    "don't want to have arrays of heap allocs rn..."
+                );
+
                 self.insert_el(symb_arr)
             }
             TypeKind::Tuple(tys) => {
-                let sort = z3_dt_sort_for_tup(tys);
-                // println!("sort is {sort:?} for ty {ty:?}");
-                let symb_tup = symb::Datatype::fresh_const(&sym_var_name("T", l), &sort.sort);
+                let symb_tup = self.sym_tup(tys, name);
 
                 self.insert_el(symb_tup)
             }
@@ -192,6 +213,7 @@ impl std::fmt::Debug for SymexConfig<'_> {
             .field("steps", &self.steps)
             .field("next_instr", &self.next_instr)
             .field("stack", &self.stack)
+            .field("heap", &self.heap)
             .finish()
     }
 }
@@ -218,7 +240,7 @@ impl<'f> SymexConfig<'f> {
         let mut inputs = HashMap::new();
         let mut heap = Heap::default();
         for (local, ty) in func.params().skip(1) {
-            let val = heap.sym_var(local, ty);
+            let val = heap.sym_var(&sym_var_name("", local), ty);
             inputs.insert(local, val.clone());
             stack.insert(local, val.into());
         }
@@ -380,7 +402,7 @@ impl<'f> SymexConfig<'f> {
     }
 
     fn handle_assert(&self, on: &Operand, span: Span) -> Result<()> {
-        // println!("handling assert on {on:?}");
+        // println!("handling assert on {on:?} in {:#?}", self);
         let cond = self
             .symb_operand(on)
             .expect_val()
@@ -472,7 +494,11 @@ impl<'f> SymexConfig<'f> {
     }
 
     /// Returns the value, and any new conditions added to the path if any
-    pub fn symb_rvalue(&self, rv: &Rvalue) -> Result<(Option<StackVal>, Option<symb::Bool>)> {
+    pub fn symb_rvalue(
+        &mut self,
+        rv: &Rvalue,
+        ty: Type,
+    ) -> Result<(Option<StackVal>, Option<symb::Bool>)> {
         match rv {
             Rvalue::Operand(op) => Ok((Some(self.symb_operand(op).into()), None)),
             Rvalue::Binop { op, left, right } => Ok((Some(self.symb_binop(op, left, right)), None)),
@@ -484,6 +510,32 @@ impl<'f> SymexConfig<'f> {
                 }
             }
             Rvalue::Call { .. } => unreachable!("handled in step_stmt"),
+            Rvalue::Alloc { kind, loc, args } => match (args, kind) {
+                (AllocArgs::Lit(lit), AllocKind::Tuple) => {
+                    let TypeKind::Tuple(tys) = ty.kind() else {
+                        panic!("ahhhh");
+                    };
+
+                    if lit.is_empty() {
+                        return Ok((None, None));
+                    }
+
+                    let name = &format!("alloc");
+                    let mut symb_tup = self.heap.sym_tup(tys, name);
+
+                    let sort = z3_dt_sort_for_tup(&tys);
+                    let accessors = &sort.variants.get(0).expect("one field").accessors;
+
+                    for (i, lit) in lit.iter().enumerate() {
+                        let accessor = &accessors[i];
+                        symb_tup =
+                            symb_tup.update_field(&accessor, &self.symb_operand(lit).expect_val());
+                    }
+                    let sv = StackVal::SymbVal(self.heap.insert_el(symb_tup).into());
+                    Ok((Some(sv), None))
+                }
+                _ => todo!(),
+            },
             e => todo!("{e} nyi"),
         }
     }
@@ -525,24 +577,24 @@ impl<'f> SymexConfig<'f> {
 
         self.inc_instr();
 
-        if let Rvalue::Alloc { kind, loc, args } = &stmt.rvalue {
-            match args {
-                AllocArgs::Lit(lit) => {
-                    if !lit.is_empty() {
-                        todo!()
-                    } else {
-                        return Ok(self);
-                    }
-                }
-                AllocArgs::Repeated { op, count } => {
-                    let symb = self.symb_operand(op).expect_val();
+        // if let Rvalue::Alloc { kind, loc, args } = &stmt.rvalue {
+        //     match args {
+        //         AllocArgs::Lit(lit) => {
+        //             if !lit.is_empty() {
+        //                 todo!()
+        //             } else {
+        //                 return Ok(self);
+        //             }
+        //         }
+        //         AllocArgs::Repeated { op, count } => {
+        //             let symb = self.symb_operand(op).expect_val();
 
-                    todo!()
-                }
-            }
-        }
+        //             todo!()
+        //         }
+        //     }
+        // }
 
-        let (new_val, path_ext) = self.symb_rvalue(&stmt.rvalue)?;
+        let (new_val, path_ext) = self.symb_rvalue(&stmt.rvalue, stmt.place.ty)?;
         if let Some(path_ext) = path_ext {
             self = self.assume(path_ext);
         }
