@@ -1,0 +1,11 @@
+// symex
+#[symex]
+fn parse(s: string) {
+  if s == "a" {
+    return ()
+  };
+
+  s := s ^ "b";
+  
+  assert(s != "ab")
+}

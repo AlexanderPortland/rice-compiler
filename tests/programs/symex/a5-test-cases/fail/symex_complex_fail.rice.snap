@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+    ╭─[symex_complex_fail.rice:24:3]
+ 23 │   assert(prefix == "abc");
+ 24 │   assert(acc != "crash")
+    ·   ───────────┬──────────
+    ·              ╰── here with inputs [x1 -> 0]
+ 25 │ }
+    ╰────
+
+'''

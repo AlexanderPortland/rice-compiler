@@ -3,6 +3,7 @@ use itertools::Itertools;
 use std::{
     collections::{HashMap, VecDeque, vec_deque},
     hash::{DefaultHasher, RandomState},
+    str::FromStr,
     sync::Arc,
 };
 use thiserror::Error;
@@ -64,7 +65,7 @@ pub fn sort_from_ty(ty: Type) -> z3::Sort {
             todo!("who the hell knows")
         }
         TypeKind::Hole(_) => unreachable!("holes should be removed during typechecking"),
-        TypeKind::String => todo!("should handle strings, but being lazy for now"),
+        TypeKind::String => z3::Sort::string(),
     }
 }
 
@@ -113,7 +114,7 @@ impl Heap {
             }
             TypeKind::Bool => symb::Bool::fresh_const(&name).into(),
             TypeKind::Int => symb::Int::fresh_const(&name).into(),
-            TypeKind::String => todo!("should handle strings, but being lazy for now"),
+            TypeKind::String => symb::String::fresh_const(&name).into(),
             TypeKind::Hole(_) => unreachable!("holes should be removed during typechecking"),
             TypeKind::Float => symb::Float::fresh_const_float32(&name).into(),
             TypeKind::Self_ | TypeKind::Interface(_) => todo!("don't have to handle these ever"),
@@ -204,7 +205,9 @@ pub fn symb_const(c: &Const) -> StackVal {
         Const::Bool(b) => symb::Bool::from_bool(*b).into(),
         Const::Int(i) => symb::Int::from_i64(*i as i64).into(),
         Const::Float(f) => symb::Float::from_f32(f.into_inner()).into(),
-        Const::String(_) => todo!("not sure how to handle strings yet"),
+        Const::String(s) => symb::String::from_str(s)
+            .expect("string should be valid")
+            .into(),
     }
 }
 
@@ -345,7 +348,10 @@ impl<'f> SymexConfig<'f> {
             (Binop::Lt, TypeKind::Float) => dir_binop!(as_float, lt),
             (Binop::Ge, TypeKind::Float) => dir_binop!(as_float, ge),
             (Binop::Le, TypeKind::Float) => dir_binop!(as_float, le),
-            _ => todo!(),
+            (Binop::Neq, TypeKind::String) => dir_binop!(as_string, ne),
+            (Binop::Eq, TypeKind::String) => dir_binop!(as_string, eq),
+            (Binop::Concat, TypeKind::String) => commute_binop!(as_string, String, concat),
+            _ => todo!("{op:?} on {:?} nyi", left.ty().kind()),
         }
     }
 
@@ -386,6 +392,8 @@ impl<'f> SymexConfig<'f> {
 
         let solve = matches!(solver.check(), SatResult::Sat);
 
+        // println!("is ASSERT solver {:#?} SAT? => {solve}", solver);
+
         let problem_inputs = solver
             .get_model()
             .map(|model| self.model_string(model))
@@ -403,6 +411,7 @@ impl<'f> SymexConfig<'f> {
     }
 
     pub fn call(mut self, f: Symbol, args: &[Operand]) -> Self {
+        // println!("calling {}", f);
         let Some(new_func) = self.in_prog.find_function(f) else {
             panic!("unknown call to {f}");
         };
@@ -491,9 +500,12 @@ impl<'f> SymexConfig<'f> {
         let mut next = self.curr_func.body.successors(self.next_instr);
         assert_eq!(next.len(), 1);
         self.next_instr = next.remove(0);
+        // println!("incr to instr {:?}", self.next_instr);
     }
 
     pub fn step_stmt(mut self, stmt: &'f Statement) -> Result<Self> {
+        // println!("step stmt {}", stmt);
+
         if let Rvalue::Call { f, args } = &stmt.rvalue {
             let to = self.known_closure(f).expect("should know all closures");
             if to == sym("assert") {
@@ -502,8 +514,10 @@ impl<'f> SymexConfig<'f> {
                         .expect("assert should have at least one argument"),
                     stmt.span,
                 )?;
+                self.inc_instr();
                 return Ok(self);
             } else {
+                // instruction increment handled within the return of the call.
                 return Ok(self.call(to, args));
             }
         }
@@ -515,6 +529,8 @@ impl<'f> SymexConfig<'f> {
                 AllocArgs::Lit(lit) => {
                     if !lit.is_empty() {
                         todo!()
+                    } else {
+                        return Ok(self);
                     }
                 }
                 AllocArgs::Repeated { op, count } => {
@@ -538,6 +554,7 @@ impl<'f> SymexConfig<'f> {
     }
 
     pub fn step_term(self, term: &'f Terminator) -> Result<SmallVec<[Self; 2]>> {
+        // println!("step term");
         match term.kind() {
             TerminatorKind::Jump(j) => {
                 // just set our next instruction to be there
@@ -568,6 +585,7 @@ impl<'f> SymexConfig<'f> {
 
 impl SymexConfig<'_> {
     pub fn step(mut self) -> Result<SmallVec<[Self; 2]>> {
+        // println!("stepping instr {} for {:#?}", self.next_instr, self.path);
         self.steps += 1;
 
         match self.curr_func.body.instr(self.next_instr) {
@@ -586,10 +604,17 @@ impl SymexConfig<'_> {
     /// Checks if this config's path is satisfiable.
     pub fn path_sat(&self) -> bool {
         let solver = z3::Solver::new();
-        solver.assert(&self.path);
+        solver.assert(&self.path.simplify());
+        // println!("is my path {solver:#?} SAT?");
         match solver.check() {
-            z3::SatResult::Unsat => false,
-            z3::SatResult::Sat => true,
+            z3::SatResult::Unsat => {
+                // println!("NO");
+                false
+            }
+            z3::SatResult::Sat => {
+                // println!("YES");
+                true
+            }
             z3::SatResult::Unknown => todo!("shouldn't get unknown rn"),
         }
     }

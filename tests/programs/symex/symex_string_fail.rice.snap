@@ -1,0 +1,17 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_string_fail.rice:8:3]
+ 7 │ 
+ 8 │   assert(s != "ab")
+   ·   ────────┬────────
+   ·           ╰── here with inputs [x1 -> "ab"]
+ 9 │ }
+   ╰────
+
+'''

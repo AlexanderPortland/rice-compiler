@@ -22,7 +22,7 @@ enum Command {
     /// Symbolically execute the source file to detect assertion failures.
     Symex {
         /// The maximum number of steps for symbolic execution.
-        #[arg(long, default_value = "50")]
+        #[arg(long, default_value = "1000")]
         max_steps: usize,
     },
 }

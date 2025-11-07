@@ -1,0 +1,18 @@
+---
+source: tests/snapshots.rs
+expression: output
+---
+success = false
+stdout = ''
+stderr = '''
+Error:   × potential assertion failure
+   ╭─[symex_tuple_fail.rice:4:22]
+ 3 │     fn example(a: (int, string), b: (bool, float)) {
+ 4 │ ╭─▶   if b.0 && b.1 > 0. {
+ 5 │ │       assert(a.0 == 0 || a.1 == "Hello")
+ 6 │ ├─▶   }
+   · ╰──── here with inputs [x1 -> 0,x2 -> 1]
+ 7 │     }
+   ╰────
+
+'''
