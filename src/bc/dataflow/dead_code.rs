@@ -57,7 +57,9 @@ struct UpdateLiveSet<'z>(&'z mut <DeadCodeAnalyis as Analysis>::Domain);
 
 impl crate::bc::visit::Visit for UpdateLiveSet<'_> {
     fn visit_rvalue_place(&mut self, place: &crate::bc::types::Place, _loc: Location) {
-        self.0.insert(place.local);
+        for place in place.places() {
+            self.0.insert(place.local);
+        }
     }
 
     fn visit_lvalue(&mut self, place: &crate::bc::types::Place, _loc: Location) {

@@ -337,8 +337,11 @@ impl ConstAnalysis {
                 Const::Float(op(*left, *right).into())
             }
             (Const::String(left), Const::String(right)) => match op {
-                Binop::Concat => Const::String(left + &right),
-                _ => return None,
+                Binop::Concat => {
+                    // println!("const eval on strings {left:?} and {right:?}");
+                    Const::String(left + &right)
+                }
+                e => return None,
             },
             _ => return None,
         };
@@ -377,7 +380,7 @@ impl Analysis for ConstAnalysis {
                 state[assigned_local] = const_val;
             } else {
                 // If we can't compute it const, it's variable
-                // state[assigned_local] = ConstInfo::Variable;
+                state[assigned_local] = ConstInfo::Variable;
             }
         }
     }

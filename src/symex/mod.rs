@@ -251,6 +251,7 @@ impl<'f> SymexConfig<'f> {
     }
 
     pub fn symb_place(&self, p: &Place) -> StackVal {
+        // println!("looking for p {p:?} in stack {:#?}", self.stack);
         let mut current_val = self.stack[&p.local].clone();
         let mut current_ty = self.curr_func.locals.value(p.local).ty;
 
