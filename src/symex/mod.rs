@@ -96,11 +96,14 @@ impl Heap {
         // println!("sort is {sort:?} for ty {ty:?}");
         let mut symb_tup = symb::Datatype::fresh_const(&format!("T{name}"), &sort.sort);
 
-        // let accessors = &sort.variants.get(0).expect("one field").accessors;
-        // for (i, ty) in tys.iter().enumerate() {
-        //     let accessor = &accessors[i];
-        //     symb_tup = symb_tup.update_field(&accessor, &self.sym_var(&format!("{name}.{i}"), *ty));
-        // }
+        let accessors = &sort.variants.get(0).expect("one field").accessors;
+        for (i, ty) in tys.iter().enumerate() {
+            if matches!(ty.kind(), TypeKind::Array(_) | TypeKind::Tuple(_)) {
+                let accessor = &accessors[i];
+                symb_tup =
+                    symb_tup.update_field(&accessor, &self.sym_var(&format!("{name}.{i}"), *ty));
+            }
+        }
 
         symb_tup
     }
@@ -290,10 +293,20 @@ impl<'f> SymexConfig<'f> {
         let ptr_i = val
             .expect_val()
             .as_int()
-            .expect("ptr that is projected on should be an int index into the stack");
+            .expect("ptr that is projected on should be an int index into the stack")
+            .simplify();
 
-        // println!("ptr i is {ptr_i:?}");
-        let ptr_i = ptr_i.as_u64().expect("should be const too");
+        let ptr_i = match ptr_i.as_u64() {
+            Some(already_const) => already_const,
+            None => {
+                // have to actually do a solve to figure this jawn out...
+                let solver = z3::Solver::new();
+                let solutions = solver.solutions(ptr_i, true).collect::<Vec<_>>();
+                assert_eq!(solutions.len(), 1);
+                let ptr_i = solutions.get(0).expect("have one");
+                ptr_i.as_u64().expect("should be const too")
+            }
+        };
 
         let alloc = &self.heap.0[ptr_i as usize];
 
