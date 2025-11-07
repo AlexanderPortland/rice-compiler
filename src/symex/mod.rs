@@ -19,7 +19,10 @@ use crate::{
 use either::Either::{Left, Right};
 use miette::{Diagnostic, Result};
 use smallvec::SmallVec;
-use z3::{SatResult, ast as symb};
+use z3::{
+    SatResult,
+    ast::{self as symb, Ast},
+};
 
 mod step;
 
@@ -50,8 +53,8 @@ struct Heap(Vec<symb::Dynamic>);
 
 pub fn sort_from_ty(ty: Type) -> z3::Sort {
     match ty.kind() {
-        TypeKind::Array(_) => z3::Sort::int(),
-        TypeKind::Tuple(_) | TypeKind::Struct(_) => {
+        TypeKind::Array(_) | TypeKind::Tuple(_) => z3::Sort::int(),
+        TypeKind::Struct(_) => {
             todo!("dont have to handle any of these yet")
         }
         TypeKind::Int => z3::Sort::int(),
@@ -65,6 +68,17 @@ pub fn sort_from_ty(ty: Type) -> z3::Sort {
     }
 }
 
+pub fn z3_dt_sort_for_tup(tys: &[Type]) -> z3::DatatypeSort {
+    let mut var = Vec::new();
+    let names = (0..tys.len()).map(|a| a.to_string()).collect::<Vec<_>>();
+    for (ty, name) in tys.iter().zip_eq(names.iter()) {
+        let a = z3::DatatypeAccessor::Sort(sort_from_ty(*ty));
+        var.push((name.as_str(), a));
+    }
+
+    z3::DatatypeBuilder::new("T").variant("tuple", var).finish()
+}
+
 impl Heap {
     pub fn next_id(&self) -> usize {
         self.0.len()
@@ -76,18 +90,25 @@ impl Heap {
     }
 
     pub fn sym_var(&mut self, l: LocalIdx, ty: Type) -> symb::Dynamic {
-        let name = sym_var_name(l);
+        let name = sym_var_name("", l);
         match ty.kind() {
             TypeKind::Array(inner) => {
                 // get new unique heap id
                 let symb_arr = symb::Array::fresh_const(
-                    &("A".to_owned() + &sym_var_name(l)),
+                    &sym_var_name("A", l),
                     &z3::Sort::int(),
                     &sort_from_ty(*inner),
                 );
                 self.insert_el(symb_arr)
             }
-            TypeKind::Tuple(_) | TypeKind::Struct(_) | TypeKind::Func { .. } => {
+            TypeKind::Tuple(tys) => {
+                let sort = z3_dt_sort_for_tup(tys);
+                // println!("sort is {sort:?} for ty {ty:?}");
+                let symb_tup = symb::Datatype::fresh_const(&sym_var_name("T", l), &sort.sort);
+
+                self.insert_el(symb_tup)
+            }
+            TypeKind::Struct(_) | TypeKind::Func { .. } => {
                 todo!("dont have to handle any of these yet")
             }
             TypeKind::Bool => symb::Bool::fresh_const(&name).into(),
@@ -111,6 +132,8 @@ struct SymexConfig<'f> {
 
     // TODO: simplify curr_func, in_prog, and stack into this logic, making things cleaner.
     call_stack: Vec<(&'f Function, Location, HashMap<LocalIdx, StackVal>)>,
+
+    datatypes: HashMap<Type, ()>,
 
     heap: Heap,
 
@@ -172,8 +195,8 @@ impl std::fmt::Debug for SymexConfig<'_> {
     }
 }
 
-pub fn sym_var_name(l: LocalIdx) -> String {
-    format!("{l}")
+pub fn sym_var_name(prefix: &str, l: LocalIdx) -> String {
+    format!("{prefix}{l}")
 }
 
 pub fn symb_const(c: &Const) -> StackVal {
@@ -204,6 +227,7 @@ impl<'f> SymexConfig<'f> {
             inputs,
             in_prog,
             heap,
+            datatypes: HashMap::new(),
             call_stack: Vec::new(),
             next_instr: func.body.entry_loc(),
             stack,
@@ -224,29 +248,40 @@ impl<'f> SymexConfig<'f> {
     }
 
     pub fn symb_place(&self, p: &Place) -> StackVal {
-        let mut proj = p.projection.clone();
         let mut current_val = self.stack[&p.local].clone();
+        let mut current_ty = self.curr_func.locals.value(p.local).ty;
 
-        while let Some(proj) = proj.pop() {
-            current_val = self.proj(current_val, proj);
+        for proj in p.projection.clone() {
+            let next_ty = proj.ty();
+            current_val = self.proj(current_val, proj, current_ty);
+            current_ty = next_ty;
         }
 
         current_val
     }
 
-    fn proj(&self, val: StackVal, proj: ProjectionElem) -> StackVal {
+    fn proj(&self, val: StackVal, proj: ProjectionElem, current_ty: Type) -> StackVal {
         let ptr_i = val
             .expect_val()
             .as_int()
-            .expect("ptr that is projected on should be an int index into the stack")
-            .as_u64()
-            .expect("should be const too");
+            .expect("ptr that is projected on should be an int index into the stack");
+
+        // println!("ptr i is {ptr_i:?}");
+        let ptr_i = ptr_i.as_u64().expect("should be const too");
 
         let alloc = &self.heap.0[ptr_i as usize];
 
         match proj {
-            ProjectionElem::Field { index, ty } => {
-                todo!()
+            ProjectionElem::Field { index, .. } => {
+                let TypeKind::Tuple(inners) = current_ty.kind() else {
+                    panic!("idkkk whats a {:?}", current_ty.kind());
+                };
+                let sort = z3_dt_sort_for_tup(inners);
+                // println!("sort is {sort:?} for current_ty {current_ty:?}");
+                StackVal::SymbVal(
+                    sort.variants.get(0).expect("only one variant").accessors[index]
+                        .apply(&[alloc]),
+                )
             }
             ProjectionElem::Index { index, .. } => {
                 let index = self
@@ -298,6 +333,7 @@ impl<'f> SymexConfig<'f> {
             (Binop::Sub, TypeKind::Int) => commute_binop!(as_int, Int, sub),
             (Binop::Mul, TypeKind::Int) => commute_binop!(as_int, Int, mul),
             (Binop::And, TypeKind::Bool) => commute_binop!(as_bool, Bool, and),
+            (Binop::Or, TypeKind::Bool) => commute_binop!(as_bool, Bool, or),
             (Binop::Eq, TypeKind::Bool) => dir_binop!(as_bool, eq),
             (Binop::Eq, TypeKind::Int) => dir_binop!(as_int, eq),
             (Binop::Div, TypeKind::Int) => dir_binop!(as_int, div),
@@ -305,6 +341,10 @@ impl<'f> SymexConfig<'f> {
             (Binop::Lt, TypeKind::Int) => dir_binop!(as_int, lt),
             (Binop::Ge, TypeKind::Int) => dir_binop!(as_int, ge),
             (Binop::Le, TypeKind::Int) => dir_binop!(as_int, le),
+            (Binop::Gt, TypeKind::Float) => dir_binop!(as_float, gt),
+            (Binop::Lt, TypeKind::Float) => dir_binop!(as_float, lt),
+            (Binop::Ge, TypeKind::Float) => dir_binop!(as_float, ge),
+            (Binop::Le, TypeKind::Float) => dir_binop!(as_float, le),
             _ => todo!(),
         }
     }
@@ -468,21 +508,32 @@ impl<'f> SymexConfig<'f> {
             }
         }
 
-        if !matches!(&stmt.rvalue, Rvalue::Alloc {
-            args: AllocArgs::Lit(e), ..
-        } if e.is_empty())
-        {
-            let (new_val, path_ext) = self.symb_rvalue(&stmt.rvalue)?;
-            if let Some(path_ext) = path_ext {
-                self = self.assume(path_ext);
-            }
+        self.inc_instr();
 
-            if let Some(new_val) = new_val {
-                self.assign_place(&stmt.place, new_val);
+        if let Rvalue::Alloc { kind, loc, args } = &stmt.rvalue {
+            match args {
+                AllocArgs::Lit(lit) => {
+                    if !lit.is_empty() {
+                        todo!()
+                    }
+                }
+                AllocArgs::Repeated { op, count } => {
+                    let symb = self.symb_operand(op).expect_val();
+
+                    todo!()
+                }
             }
         }
 
-        self.inc_instr();
+        let (new_val, path_ext) = self.symb_rvalue(&stmt.rvalue)?;
+        if let Some(path_ext) = path_ext {
+            self = self.assume(path_ext);
+        }
+
+        if let Some(new_val) = new_val {
+            self.assign_place(&stmt.place, new_val);
+        }
+
         Ok(self)
     }
 

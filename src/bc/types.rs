@@ -726,4 +726,10 @@ impl ProjectionElem {
             Self::Index { index, .. } => index.places(),
         }
     }
+
+    pub fn ty(&self) -> Type {
+        match self {
+            Self::Field { ty, .. } | Self::Index { ty, .. } => *ty,
+        }
+    }
 }
