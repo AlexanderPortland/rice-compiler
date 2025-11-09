@@ -5,7 +5,8 @@ use std::fmt::Debug;
 use miette::Result;
 use strum::{Display, EnumString};
 
-use crate::bc::dataflow::{dead_control, ptr};
+use crate::bc::dataflow::dead_func::eliminate_dead_funcs;
+use crate::bc::dataflow::{dead_control, inline, ptr};
 
 use self::types::{Function, Program};
 use dataflow::r#const::const_prop;
@@ -49,16 +50,19 @@ pub struct OptimizeOptions {
 /// Optimizations are disabled at [`OptLevel::NoOpt`].
 pub fn optimize(prog: &mut Program, opts: OptimizeOptions) {
     if matches!(opts.opt_level, OptLevel::AllOpt) {
+        let old_prog = prog.clone();
         for func in prog.functions_mut() {
-            optimize_func(func);
+            optimize_func(&old_prog, func);
         }
+
+        eliminate_dead_funcs(prog);
     }
 }
 
 type Pass = Box<dyn Fn(&mut Function) -> bool>;
 
 /// Run optimization passes to a fixed point.
-fn optimize_func(func: &mut Function) {
+fn optimize_func(old_prog: &Program, func: &mut Function) {
     let passes: Vec<Pass> = vec![
         // TODO: insert passes here
         Box::new(const_prop),
@@ -78,10 +82,21 @@ fn optimize_func(func: &mut Function) {
         for pass in &passes {
             changed |= pass(func);
 
+            // println!("before cleanup have func {func}");
             for cleanup in &cleanup_passes {
                 cleanup(func);
             }
+            // println!("after cleanup have func {func}");
         }
+
+        // Manually inline for now bc of lifetime goofiness when capturing old_prog
+        // TODO: handle this automatically
+        changed |= inline::inline_calls(old_prog, func);
+        for cleanup in &cleanup_passes {
+            cleanup(func);
+        }
+        // println!("after cleanup have func {func}");
+
         if !changed {
             break;
         }

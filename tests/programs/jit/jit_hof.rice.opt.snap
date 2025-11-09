@@ -12,8 +12,8 @@ stdout = '''
 stderr = ''
 
 [stats]
-bc_stmts = 25
-bc_locals = 31
-bc_blocks = 5
-exec_calls = 15
-exec_steps = 25
+bc_stmts = 21
+bc_locals = 25
+bc_blocks = 4
+exec_calls = 12
+exec_steps = 17

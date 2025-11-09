@@ -7,6 +7,8 @@
 pub mod r#const;
 pub mod dead_code;
 pub mod dead_control;
+pub mod dead_func;
+pub mod inline;
 pub mod ptr;
 
 use either::Either;

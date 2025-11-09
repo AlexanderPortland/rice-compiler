@@ -1,0 +1,10 @@
+
+fn add1(t: int) -> int {
+    t + 2
+}
+
+fn main() {
+    let t = 0 in
+    let z = add1(t) in
+    println(int_to_string(z))
+}

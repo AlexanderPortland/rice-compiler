@@ -1,17 +1,23 @@
 use crate::bc::{
     dataflow::{self, Analysis, JoinSemiLattice, analyze_to_fixpoint},
-    types::{AllocArgs, AllocKind, Binop, Function, Local, Location, Operand, Rvalue, Statement},
+    types::{
+        AllocArgs, AllocKind, Binop, Function, Local, Location, Operand, Program, Rvalue, Statement,
+    },
     visit::{Visit, VisitMut},
 };
 use indexical::{ArcIndexSet, ArcIndexVec, RcIndexSet, pointer::PointerFamily, vec::IndexVec};
 use itertools::Itertools;
 
+// TODO: elimate dead functions that are never called.
+
 /// Eliminates **any 'dead' statement** that binds a place which isn't used in the rest of the program.
 pub fn eliminate_dead_code(func: &mut Function) -> bool {
+    // println!("before DCE have func {func}");
     let analysis_result = analyze_to_fixpoint(&DeadCodeAnalyis, func);
 
     let mut eliminator = DeadCodeElimination::new(&analysis_result);
     eliminator.visit_function(func);
+    // println!("after DCE have func {func}");
     eliminator.any_change
 }
 
@@ -75,9 +81,10 @@ struct DeadCodeElimination<'z> {
 }
 
 #[derive(Default)]
-struct AnyArrayIndex(bool);
+// Checks for alloc use and divisions (things that could fail or have side effects at runtime)
+struct AnyAllocUse(bool);
 
-impl Visit for AnyArrayIndex {
+impl Visit for AnyAllocUse {
     fn visit_rvalue(&mut self, rvalue: &Rvalue, loc: Location) {
         if matches!(rvalue, Rvalue::Binop { op: Binop::Div, .. }) {
             self.0 |= true;
@@ -86,21 +93,13 @@ impl Visit for AnyArrayIndex {
         self.super_visit_rvalue(rvalue, loc);
     }
     fn visit_rvalue_place(&mut self, place: &crate::bc::types::Place, _loc: Location) {
-        if place
-            .projection
-            .iter()
-            .any(|p| matches!(p, crate::bc::types::ProjectionElem::Index { .. }))
-        {
+        if !place.projection.is_empty() {
             self.0 |= true;
         }
     }
 
     fn visit_lvalue(&mut self, place: &crate::bc::types::Place, _loc: Location) {
-        if place
-            .projection
-            .iter()
-            .any(|p| matches!(p, crate::bc::types::ProjectionElem::Index { .. }))
-        {
+        if !place.projection.is_empty() {
             self.0 |= true;
         }
     }
@@ -133,7 +132,7 @@ impl<'z> DeadCodeElimination<'z> {
 
         // Check if we access an element of an array.
         // This could fail at runtime, so should not be optimized away
-        let mut has_arrays = AnyArrayIndex::default();
+        let mut has_arrays = AnyAllocUse::default();
         has_arrays.visit_statement(stmt, loc);
         if has_arrays.0 {
             return true;

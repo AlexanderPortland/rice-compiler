@@ -306,6 +306,11 @@ pub fn remove_unused_locals(func: &mut Function) -> bool {
     true
 }
 
+pub fn update_locals_w(func: &mut Function, f: &dyn Fn(LocalIdx) -> LocalIdx) {
+    let mut updater = LocalUpdater(f);
+    updater.visit_function(func);
+}
+
 fn used_locals(func: &Function) -> HashSet<LocalIdx> {
     let mut visit = LocalVisitor::new(&func.locals);
     visit.visit_function(func);
@@ -338,7 +343,28 @@ impl Visit for LocalVisitor {
     }
 }
 
-struct LocalUpdater<'z>(&'z dyn Fn(LocalIdx) -> LocalIdx);
+/// TODO: merge these jawns...
+pub struct BBUpdater<'z>(pub &'z dyn Fn(BasicBlockIdx) -> BasicBlockIdx);
+
+impl VisitMut for BBUpdater<'_> {
+    fn visit_terminator(&mut self, term: &mut crate::bc::types::Terminator, loc: Location) {
+        match &mut term.kind {
+            TerminatorKind::CondJump {
+                cond,
+                true_,
+                false_,
+            } => {
+                *true_ = self.0(*true_);
+                *false_ = self.0(*false_);
+            }
+            TerminatorKind::Jump(to) => *to = self.0(*to),
+            TerminatorKind::Return(_) => (),
+        }
+        self.super_visit_terminator(term, loc);
+    }
+}
+
+pub struct LocalUpdater<'z>(pub &'z dyn Fn(LocalIdx) -> LocalIdx);
 
 impl VisitMut for LocalUpdater<'_> {
     #[allow(clippy::only_used_in_recursion)]

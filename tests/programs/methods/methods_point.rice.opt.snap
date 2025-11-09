@@ -9,11 +9,12 @@ stdout = '''
 stderr = ''
 
 [stats]
-bc_stmts = 32
-bc_locals = 36
-bc_blocks = 4
-exec_calls = 7
-exec_steps = 32
+bc_stmts = 33
+bc_locals = 35
+bc_blocks = 3
+exec_calls = 6
+exec_steps = 33
 
 [stats.allocs]
-Heap = 3
+Stack = 2
+Heap = 1

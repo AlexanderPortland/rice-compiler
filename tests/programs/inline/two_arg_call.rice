@@ -1,0 +1,15 @@
+
+fn add1(a: int, b: int) -> int {
+    if a > 0 {
+        a - b
+    } else {
+        a + b
+    }
+}
+
+fn main() {
+    let t1 = 10 in
+    let t2 = 5 in
+    let z = add1(t1, t2) in
+    println(int_to_string(z))
+}

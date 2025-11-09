@@ -9,8 +9,8 @@ stdout = '''
 stderr = ''
 
 [stats]
-bc_stmts = 8
-bc_locals = 9
-bc_blocks = 3
-exec_calls = 6
-exec_steps = 9
+bc_stmts = 5
+bc_locals = 5
+bc_blocks = 2
+exec_calls = 4
+exec_steps = 5

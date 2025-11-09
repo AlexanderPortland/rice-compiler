@@ -36,6 +36,10 @@ impl Program {
         &self.0
     }
 
+    pub fn retain_functions<F: Fn(&Function) -> bool>(&mut self, f: F) {
+        self.0.retain(f);
+    }
+
     /// NOTE: returns none if the function's defined within the standard library.
     pub fn find_function(&self, sym: impl Borrow<Symbol>) -> Option<&Function> {
         let sym = sym.borrow();
@@ -120,6 +124,12 @@ impl Function {
     #[must_use]
     pub fn jit(&self) -> bool {
         self.annots.iter().any(|annot| annot.name == "jit")
+    }
+
+    /// Returns true if this function has arguments that use dynamic dispatch.
+    pub fn dynamic(&self) -> bool {
+        self.params()
+            .any(|(_, ty)| matches!(ty.kind(), TypeKind::Interface(_)))
     }
 
     /// Returns true if the function is annotated with `#[secure]`.
